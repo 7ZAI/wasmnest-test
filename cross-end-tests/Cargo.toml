@@ -1,0 +1,187 @@
+[package]
+name = "cross-end-tests"
+# 跨端真实互连集成测试（移动端真实客户端代码 ↔ 桌面端真实服务器，
+# 同一进程、零 mock）。2026-10-18 自平台仓 `cross-end-tests/` 迁入测试容器仓
+# `wasmnest-test/cross-end-tests/`（容器仓与平台仓 / 能力仓 / 应用仓平级，同放
+# ${WASMNEST} 下；容器下可并列多个测试工程，各自独立 Cargo workspace）。
+# spec：.scratch/2026-09-30-cross-end-integration-tests/spec.md
+# 版本号不参与发布（publish = false），两端版本以各自 Cargo.toml 为准
+version = "0.0.1"
+license = "MIT"
+edition = "2021"
+publish = false
+
+[workspace]
+# 本包兼作 workspace 根：成员 `desktop-harness`（两进程 rig 的桌面进程）共享同一个
+# target 桶——两包依赖图重叠绝大部分，独立桶会重复编译 wasmtime/tauri/桌面 lib
+# （实测 7GiB+，且把开发盘推到 92% 满）；共享后 harness bin 落在
+# `wasmnest-test/target/debug/wasmnest-crossend-desktop-harness`，
+# `cargo test` 一条命令建 + 跑两端（spec：.scratch/2026-10-15-cross-end-two-process/spec.md）
+members = [".", "desktop-harness"]
+
+[lib]
+# 空 lib：让 `cargo build` 有目标可建（内容只有 crate 级说明）
+path = "src/lib.rs"
+
+[dependencies]
+# 依赖键 = lib name（路径依赖默认用 package 名，必须显式 `package` 重命名到
+# lib name——这正是 L0 改名的直接收益：两端 lib 同名时无法各起一个依赖键）
+# L0 改名（`bedcode_lib` → 端专用名）之前，这两行只能二选一。
+# **optional（2026-10-15 两进程形态）**：单进程 rig 场景依赖桌面 lib；两进程模式
+# （`--no-default-features --features two-proc`）把它整体从依赖图排除——否则 cargo
+# feature 统一会把 server-crate 的 `common-host` 绑定编译进两进程测试二进制，
+# 移动 whitelist 直接红（spec §5.1 实测）。feature 门控是**依赖图级**事实（原可选）。
+# 两端宿主住平台仓（兄弟目录 `<WASMNEST>/wasmnest/`）；能力仓经平台仓 `packages/`
+# submodule 挂载点读取——与平台仓自身构建同源，保证依赖图中能力 crate 只有一份。
+wasmnest-desktop-lib = { package = "wasmnest-desktop", path = "../../wasmnest/wasmnest-desktop/src-tauri", optional = true }
+wasmnest-mobile-lib = { package = "wasmnest-mobile", path = "../../wasmnest/wasmnest-mobile/src-tauri" }
+# server-lib-split 票 07：桌面端 server 基础层（**端口 traits 的定义处**）。仅用于
+# 装配自检直读 `ports::get()` —— 端口注册表是进程级单例，rig 是否装了端口面正是
+# 「七个场景同时 404」那次实测的根因，必须有一条**不经过被测代码**的可观测判据。
+# 端口**装配**本身仍走宿主组合根 `server::composition::install_server_ports()`
+# （与 GUI bootstrap 同一函数），本依赖只让自检能验「装的是不是真端口面」。
+wasmnest-server-base = { package = "wasmnest-server-base", path = "../../wasmnest/packages/wasmnest-server-base" }
+# 事件通道场景（票 01）：**只读**观测桌面 WS 传输注册表（端点表 + 连接认证态）。
+# 用途：给「移动端首帧认证已被桌面端接受」一条无竞态的可观测判据——移动端的就绪
+# 信号（`ws_event_channel_ready`）在首帧**发出后**即发射，插件侧的零客户端早退看
+# `clientCount`，两者之间存在窗口；注册表的 `authenticated` 恰是窗口终点。
+# 本依赖不参与任何应答生成（零 mock 口径不变）。
+wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../wasmnest/packages/wasmnest-server-websocket" }
+# HTTP 代理面场景（票 02）：headless 启动期**链路加密装配**（建身份 / 开主开关 /
+# 注册过滤器——GUI 侧由 `composition::init_link_crypto_at_startup` 经 AppHandle 做，
+# rig 无 AppHandle 故直调 core 的同名装配），以及**只读**加密计数器（证明信封真的
+# 加/解密过，不是“明文 200”恒真）。同样不参与任何应答生成。
+wasmnest-server-core = { package = "wasmnest-server-core", path = "../../wasmnest/packages/wasmnest-server-core" }
+# mDNS 自播面真源（mdns-advertiser 迁移出宿主）：rig 与 GUI 同构地构造
+# `advertiser::MdnsAdvertiser`（宿主已零 mdns 残留，desktop_ctx 改直引本 crate）
+wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../wasmnest/packages/wasmnest-discovery-engine" }
+
+[dev-dependencies]
+# tokio：测试运行时与轮询等待（与两端同版本，依赖图统一为一份）
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+serde_json = "1"
+# tracing：把两端链路日志（含桌面插件 WASM 日志）导到 test harness，失败现场可查
+tracing = "0.1"
+# tauri：仅用 `ipc::Channel` 承接移动端终端链路推给「页面」的输出帧。
+# 与两端依赖同版本（2.11.1）→ 依赖图统一为一份 crate，类型同一性成立
+# （若解析出两份 tauri，`Channel<InvokeResponseBody>` 传不进移动端 API）
+tauri = { version = "2" }
+# actix-web：仅取 `dev::ServerHandle` 类型标注（服务器本体由桌面端 crate 内部
+# 启动；与桌面端同版本 → 依赖图统一为一份，ServerHandle 类型同一性成立）
+actix-web = "4"
+# 装配自检里「端点路由是否存在」的裸 WS 升级探测用（不承载协议：认证 / 订阅
+# 全部由移动端真实客户端 `TerminalLinkManager` 走，场景测试不含通用 WS 客户端）。
+# 与移动端同版本 → 依赖图统一为一份
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 跨端链路场景（2026-10-15）：在测试内以无头宿主上下文加载**移动端真实插件产物**
+# （终端订阅协议 / 会话 HTTP / 认证编排已随票 12/15 下沉 wasm 插件，移动 lib 里
+# 已无 `terminal_link` / `session::http`）。需要 wasm-core 的测试装配面
+# （MockPorts / build_host_ctx_with / headless runtime），与两端自身测试同一套夹具。
+wasmnest-wasm-core = { path = "../../wasmnest/packages/wasmnest-wasm-core", default-features = false, features = ["test-support"] }
+# `ConnectionEnginePort` / 端口替身是 async trait（与两端同版本）
+async-trait = "0.1"
+# 事件通道场景的会话触发面（带移动 JWT 的真实 HTTP；形状与桌面 HTTP 面逐字对齐）。
+# 移动侧会话 HTTP 客户端已随票 13 下沉 wasm 插件，而单进程 rig 装不下两端宿主域实现，
+# 故此处用宿主同版本的 reqwest 直打桌面路由（协议形状由桌面侧测试互补钉住）。
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# 移动插件世界夹具的错误类型（与两端同版本）
+anyhow = "1"
+# 两进程 rig 的装配守卫（2026-10-15）：`two_proc_selfcheck` 用 `ModuleRegistry::collected()`
+# 对表——two-proc 模式只能含移动宿主模块（依赖图被破坏 / `desktop`+`two-proc` 混用时显性红）
+wasmnest-host-kit = { path = "../../wasmnest/packages/wasmnest-host-kit" }
+
+[features]
+# 两种构建模式（2026-10-15 两进程形态）：
+# - default（`desktop`）：单进程 rig——桌面 lib 在依赖图（common-host 随之开启），
+#   `[[test]] required-features = ["desktop"]` 的单进程场景编译 + 运行；
+# - `two-proc`：两进程 rig 的测试侧——桌面 lib **整个出图** ⇒ server-crate 的
+#   `common-host` 无人开启 ⇒ 绑定模块不提交 ⇒ 移动 whitelist 干净（与移动包依赖图
+#   同构，每日全绿已证）。两进程测试协调 `desktop-harness`（独立包，桌面侧）经
+#   stdin/stdout JSON-RPC 互连。
+# ⚠ cargo 无法强制两 feature 互斥：混用会复现污染，但 inventory 装配守卫
+# （`two_proc_selfcheck::test_process_inventory_is_mobile_only`）运行时直接红——
+# 显性失败不静默。
+default = ["desktop"]
+desktop = ["dep:wasmnest-desktop-lib"]
+two-proc = []
+
+# ==================== 测试目标 ====================
+# 每个场景 = 一个独立测试二进制（AppContext 进程级单例，场景间靠进程隔离）。
+# 显式 [[test]] 只为 `required-features`（按构建模式决定编译集）：
+# 单进程场景引用 `common/desktop_ctx`（依赖桌面 lib）→ 仅 `desktop` 模式编译；
+# 两进程场景只引用移动侧 → 仅 `two-proc` 模式编译（desktop 模式编译会因
+# 依赖图含桌面 lib 而被 whitelist 拒绝）。
+
+[[test]]
+name = "harness_selfcheck"
+required-features = ["desktop"]
+
+[[test]]
+name = "pairing_auth_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "jwt_rotate_reconnect"
+required-features = ["desktop"]
+
+[[test]]
+name = "session_http_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "terminal_ws_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "fail_closed_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "lifecycle_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "event_channel_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "http_proxy_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "mdns_health_flow"
+required-features = ["desktop"]
+
+[[test]]
+name = "two_proc_selfcheck"
+required-features = ["two-proc"]
+
+[[test]]
+name = "two_proc_terminal_ws"
+required-features = ["two-proc"]
+
+# ==================== 编译资源（对齐两端，避免 wasmtime/actix 编译期 OOM） ====================
+# 路径依赖的 profile 只认本包根（workspace 语义）：不写则退回 cargo 默认
+# （全量调试信息 + 无 line-tables 优化），编译峰值内存显著更高、体积更大。
+# 取值与两端同款，理由见仓库根 `.cargo/config.toml` 与两端 `Cargo.toml` 注释。
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+split-debuginfo = "packed"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test.package.wasmtime]
+debug-assertions = false
+
+# ==================== [patch] 本地 SDK 指回（票 07 / L2/E2a-B） ====================
+# `default = ["desktop"]` 时本 rig 依赖桌面宿主（`wasmnest-desktop-lib`），后者启用
+# wasm-core 的 `desktop-assembly` feature ⇒ 内核声明的已发布版本桌面 SDK
+# `wasmnest-plugin-api` 进入解析图；patch 指回工作树 SDK（版本必须与 lib 声明一致）。
+# `--no-default-features --features two-proc`（桌面宿主整体出图）下该依赖不在解析图，
+# cargo 会给出「patch 未被使用」warning —— 属预期（不可按 feature 条件化 patch）。
+[patch.crates-io]
+wasmnest-plugin-api = { path = "../../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/rust" }

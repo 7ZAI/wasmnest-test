@@ -1,0 +1,12 @@
+# Rust 代码格式化配置（rustfmt）
+# 与两端 `src-tauri/rustfmt.toml` 同款（同一 Rust 代码风格，取自两端真源）。
+
+edition = "2021"
+
+# 单行最大宽度，与两端一致（120）
+max_width = 120
+
+# 缩进宽度与换行风格（stable 支持项）
+use_small_heuristics = "Default"
+reorder_imports = true
+reorder_modules = true
