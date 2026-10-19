@@ -9,8 +9,8 @@
 //! 本锁把「核内判据不得回流 / 双适配器在场 / 移动端不得重建产物源」变成可执行断言。
 //! 六条判据（单产物后从「双端各一份」改写为「一份产物 + 桌面/移动两套端口适配」）：
 //!
-//! 1. **零回流**：核内 23 个纯逻辑函数名，在共享产物 crate 的 `rust/src/**` 里
-//!    **不得有同名 `fn` 定义**；
+//! 1. **零回流**：核内 23 个纯逻辑函数名，在共享产物 crate 的 `rust/plugin/src/**` 里
+//!    **不得有同名 `fn` 定义**（纯逻辑只允许住 `rust/core`）；
 //! 2. **台账是纯转出**：共享 crate 的 `transfer_store.rs` 必须含逐字相同的转出行；
 //! 3. **双适配器在场**：`adapters.rs`（桌面行为）与 `adapters_mobile.rs`（移动行为）
 //!    都必须实现核的**已消费端口**（实现即接线证据；缺一侧 = 平台分支被拆）；
@@ -35,10 +35,10 @@
 //! 判据 7 扫的是 **wit 文本**（文档注释前缀是 `///` 而非 `//`，按整行跳过）。
 //!
 //! 位置说明（三仓拆分票 08 批次三 → 2026-10-18 跨端测试面独立成仓）：本锁自应用仓
-//! `apps/file-transfer/rust/src/wiring_lock.rs` 迁入平台仓 cross-end 测试面，
-//! 2026-10-18 随该测试面再迁出为独立仓 `wasmnest-test`——它扫的是双端 SDK compose/WIT、
-//! 仓根 contracts 与应用树，主题属平台契约（spec §5-E2b #9 / §7）。应用仓侧不再保留
-//! 该测试（app 测试面至此零平台源码读取）。
+//! 应用级 rust 层迁入平台仓 cross-end 测试面，2026-10-18 随该测试面再迁出为独立仓
+//! `wasmnest-test`——它扫的是双端 SDK compose/WIT、`wasmnest-contract` 与应用树，
+//! 主题属平台契约（spec §5-E2b #9 / §7）。应用仓侧不再保留该测试
+//! （app 测试面至此零平台源码读取）。
 //!
 //! 路径基准：平台仓根经 `tests/common/repo_paths.rs` 解析（兄弟目录 `../wasmnest`
 //! 或 `WASMNEST_PLATFORM_ROOT`）；应用仓经 `WASMNEST_APPS_ROOT` / 兄弟目录 resolver
@@ -122,9 +122,14 @@ fn app_root() -> PathBuf {
     app_paths::apps_root().join("apps/file-transfer")
 }
 
-/// 共享产物 crate 根（`apps/file-transfer/rust`；核内自读 `src/ports.rs` 等在此）。
-fn crate_root() -> PathBuf {
-    app_root().join("rust")
+/// 共享产物 crate 根（`apps/file-transfer/rust/plugin`；适配层 / 台账 / 编排在此）。
+fn plugin_crate_root() -> PathBuf {
+    app_root().join("rust/plugin")
+}
+
+/// 双端共享业务核根（`apps/file-transfer/rust/core`；端口 trait 与纯逻辑在此）。
+fn core_crate_root() -> PathBuf {
+    app_root().join("rust/core")
 }
 
 /// 平台仓根（跨端测试仓的兄弟目录 `<WASMNEST>/wasmnest`）。
@@ -132,9 +137,9 @@ fn platform_root() -> PathBuf {
     repo_paths::platform_root()
 }
 
-/// 共享产物 crate 的源码目录（单产物唯一源：`apps/file-transfer/desktop/rust/src`）。
+/// 共享产物 crate 的源码目录（单产物唯一源：`apps/file-transfer/rust/plugin/src`）。
 fn app_src_dir() -> PathBuf {
-    app_root().join("desktop/rust/src")
+    plugin_crate_root().join("src")
 }
 
 /// 剥行注释（引号感知：字符串内的 `//` 不是注释起点）
@@ -327,7 +332,7 @@ fn both_platform_adapters_ship_consumed_ports() {
 /// 判据 4：核端口面登记在册——`ports.rs` 的 `pub trait` 集合与清单精确相等
 #[test]
 fn core_port_surface_is_registered() {
-    let ports = crate_root().join("src/ports.rs");
+    let ports = core_crate_root().join("src/ports.rs");
     let text = fs::read_to_string(&ports).expect("读核 ports.rs");
     let prod: Vec<String> = text
         .lines()
@@ -362,8 +367,8 @@ fn mobile_artifact_source_stays_retired() {
     let retired = app_root().join("mobile/rust");
     assert!(
         !retired.exists(),
-        "移动端 file-transfer rust/ 重新出现（{}）：双端单产物的产物源只有桌面 \
-         wasm-apps/file-transfer/rust——移动端差异是同一 crate 内的平台分支，不是第二份产物源",
+        "移动端 file-transfer rust/ 重新出现（{}）：双端单产物的产物源只有应用级 \
+         `apps/file-transfer/rust/plugin`——移动端差异是同一 crate 内的平台分支，不是第二份产物源",
         retired.display()
     );
 }
@@ -374,7 +379,7 @@ fn mobile_artifact_source_stays_retired() {
 /// 端口行为。链移动 SDK 会让产物 import 移动 cap 界面 ⇒ 桌面宿主实例化失败。
 #[test]
 fn shared_app_depends_on_desktop_sdk_only() {
-    let manifest = app_root().join("desktop/rust/Cargo.toml");
+    let manifest = plugin_crate_root().join("Cargo.toml");
     let text = fs::read_to_string(&manifest).expect("读共享 crate Cargo.toml");
     let prod: Vec<String> = text
         .lines()
