@@ -31,8 +31,9 @@ path = "src/lib.rs"
 # （`--no-default-features --features two-proc`）把它整体从依赖图排除——否则 cargo
 # feature 统一会把 server-crate 的 `common-host` 绑定编译进两进程测试二进制，
 # 移动 whitelist 直接红（spec §5.1 实测）。feature 门控是**依赖图级**事实（原可选）。
-# 两端宿主住平台仓（兄弟目录 `<WASMNEST>/wasmnest/`）；能力仓经平台仓 `packages/`
-# submodule 挂载点读取——与平台仓自身构建同源，保证依赖图中能力 crate 只有一份。
+# 两端宿主住平台仓（兄弟目录 `<WASMNEST>/wasmnest/`）；能力仓经 sibling
+# `<WASMNEST>/wasmnest-lib/<crate>` 读取——与平台仓自身构建同源，保证依赖图中能力 crate
+# 只有一份（类型同一性）。
 wasmnest-desktop-lib = { package = "wasmnest-desktop", path = "../../wasmnest/wasmnest-desktop/src-tauri", optional = true }
 wasmnest-mobile-lib = { package = "wasmnest-mobile", path = "../../wasmnest/wasmnest-mobile/src-tauri" }
 # server-lib-split 票 07：桌面端 server 基础层（**端口 traits 的定义处**）。仅用于
@@ -40,21 +41,21 @@ wasmnest-mobile-lib = { package = "wasmnest-mobile", path = "../../wasmnest/wasm
 # 「七个场景同时 404」那次实测的根因，必须有一条**不经过被测代码**的可观测判据。
 # 端口**装配**本身仍走宿主组合根 `server::composition::install_server_ports()`
 # （与 GUI bootstrap 同一函数），本依赖只让自检能验「装的是不是真端口面」。
-wasmnest-server-base = { package = "wasmnest-server-base", path = "../../wasmnest/packages/wasmnest-server-base" }
+wasmnest-server-base = { package = "wasmnest-server-base", path = "../../wasmnest-lib/wasmnest-server-base" }
 # 事件通道场景（票 01）：**只读**观测桌面 WS 传输注册表（端点表 + 连接认证态）。
 # 用途：给「移动端首帧认证已被桌面端接受」一条无竞态的可观测判据——移动端的就绪
 # 信号（`ws_event_channel_ready`）在首帧**发出后**即发射，插件侧的零客户端早退看
 # `clientCount`，两者之间存在窗口；注册表的 `authenticated` 恰是窗口终点。
 # 本依赖不参与任何应答生成（零 mock 口径不变）。
-wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../wasmnest/packages/wasmnest-server-websocket" }
+wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../wasmnest-lib/wasmnest-server-websocket" }
 # HTTP 代理面场景（票 02）：headless 启动期**链路加密装配**（建身份 / 开主开关 /
 # 注册过滤器——GUI 侧由 `composition::init_link_crypto_at_startup` 经 AppHandle 做，
 # rig 无 AppHandle 故直调 core 的同名装配），以及**只读**加密计数器（证明信封真的
 # 加/解密过，不是“明文 200”恒真）。同样不参与任何应答生成。
-wasmnest-server-core = { package = "wasmnest-server-core", path = "../../wasmnest/packages/wasmnest-server-core" }
+wasmnest-server-core = { package = "wasmnest-server-core", path = "../../wasmnest-lib/wasmnest-server-core" }
 # mDNS 自播面真源（mdns-advertiser 迁移出宿主）：rig 与 GUI 同构地构造
 # `advertiser::MdnsAdvertiser`（宿主已零 mdns 残留，desktop_ctx 改直引本 crate）
-wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../wasmnest/packages/wasmnest-discovery-engine" }
+wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../wasmnest-lib/wasmnest-discovery-engine" }
 
 [dev-dependencies]
 # tokio：测试运行时与轮询等待（与两端同版本，依赖图统一为一份）
@@ -79,7 +80,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # （终端订阅协议 / 会话 HTTP / 认证编排已随票 12/15 下沉 wasm 插件，移动 lib 里
 # 已无 `terminal_link` / `session::http`）。需要 wasm-core 的测试装配面
 # （MockPorts / build_host_ctx_with / headless runtime），与两端自身测试同一套夹具。
-wasmnest-wasm-core = { path = "../../wasmnest/packages/wasmnest-wasm-core", default-features = false, features = ["test-support"] }
+wasmnest-wasm-core = { path = "../../wasmnest-lib/wasmnest-wasm-core", default-features = false, features = ["test-support"] }
 # `ConnectionEnginePort` / 端口替身是 async trait（与两端同版本）
 async-trait = "0.1"
 # 事件通道场景的会话触发面（带移动 JWT 的真实 HTTP；形状与桌面 HTTP 面逐字对齐）。
@@ -90,7 +91,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 anyhow = "1"
 # 两进程 rig 的装配守卫（2026-10-15）：`two_proc_selfcheck` 用 `ModuleRegistry::collected()`
 # 对表——two-proc 模式只能含移动宿主模块（依赖图被破坏 / `desktop`+`two-proc` 混用时显性红）
-wasmnest-host-kit = { path = "../../wasmnest/packages/wasmnest-host-kit" }
+wasmnest-host-kit = { path = "../../wasmnest-lib/wasmnest-host-kit" }
 
 [features]
 # 两种构建模式（2026-10-15 两进程形态）：

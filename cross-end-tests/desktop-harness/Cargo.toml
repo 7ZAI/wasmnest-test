@@ -20,13 +20,13 @@ path = "src/main.rs"
 # 依赖键 = lib name（与本仓 cross-end-tests 包同口径；L0 改名的直接收益）
 wasmnest-desktop-lib = { package = "wasmnest-desktop", path = "../../../wasmnest/wasmnest-desktop/src-tauri" }
 # WS 端点表 + 连接认证态观测（只读：给「移动端首帧认证已被桌面端接受」无竞态判据）
-wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../../wasmnest/packages/wasmnest-server-websocket" }
+wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../../wasmnest-lib/wasmnest-server-websocket" }
 # headless 链路加密装配 + 加密计数器快照（http_proxy 场景用；本阶段先留口）
-wasmnest-server-core = { package = "wasmnest-server-core", path = "../../../wasmnest/packages/wasmnest-server-core" }
+wasmnest-server-core = { package = "wasmnest-server-core", path = "../../../wasmnest-lib/wasmnest-server-core" }
 # mDNS 自播面（mdns_health 场景用；本阶段先留口）
-wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../../wasmnest/packages/wasmnest-discovery-engine" }
+wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../../wasmnest-lib/wasmnest-discovery-engine" }
 # 装配守卫（inventory collected 对表，fail-visible）
-wasmnest-host-kit = { path = "../../../wasmnest/packages/wasmnest-host-kit" }
+wasmnest-host-kit = { path = "../../../wasmnest-lib/wasmnest-host-kit" }
 serde_json = "1"
 # tokio：进程 stdin/stdout 控制面 + 服务器任务（与两端/rig 同版本）
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "process"] }

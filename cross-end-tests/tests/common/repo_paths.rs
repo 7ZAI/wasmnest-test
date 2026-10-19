@@ -11,16 +11,15 @@
 //!
 //! ## 基准与规则（fail-visible）
 //!
-//! - `platform_root()`：平台仓根（`<WASMNEST>/wasmnest`），内含双端宿主与能力仓
-//!   submodule 挂载点 `packages/`。
+//! - `platform_root()`：平台仓根（`<WASMNEST>/wasmnest`），内含双端宿主。
 //!   1. `WASMNEST_PLATFORM_ROOT` 显式指定（CI / 非常规布局）；
 //!   2. 未设时自 `CARGO_MANIFEST_DIR` 向上逐级找**兄弟目录** `wasmnest`
 //!      （R1 布局：四仓同放 `${WASMNEST}` 下，本工程在其一子目录中亦可命中）；
 //!   3. 都找不到即 panic，绝不返回可能无效的路径。
-//! - `lib_root()`：能力仓根 = 平台仓 `packages/` submodule 挂载点。**必须经此读取**
-//!   （而非兄弟目录 `wasmnest-lib/`）：平台仓双端宿主的 Cargo path 依赖写死
-//!   `../../packages/<crate>`，本仓只有指到同一物理路径，依赖图里能力 crate 才
-//!   只有一份、类型同一性才成立。
+//! - `lib_root()`：能力仓根（平台仓的兄弟目录 `../wasmnest-lib`，或
+//!   `WASMNEST_LIB_ROOT`）。能力仓维护全部内部依赖 crate；平台仓宿主的 Cargo path
+//!   依赖写死 `../../../wasmnest-lib/<crate>`，本仓必须指到**同一物理路径**，依赖图
+//!   里能力 crate 才只有一份、类型同一性才成立。
 //!
 //! 应用仓（`wasmnest-apps`）的解析见 `tests/common/app_paths.rs`（`WASMNEST_APPS_ROOT` +
 //! 兄弟目录发现，自平台仓迁出前同款）。
@@ -56,9 +55,28 @@ pub fn platform_root() -> PathBuf {
     );
 }
 
-/// 能力仓根：平台仓 `packages/` submodule 挂载点。
+/// 能力仓根：平台仓的兄弟目录 `../wasmnest-lib`（或 `WASMNEST_LIB_ROOT`）。
 pub fn lib_root() -> PathBuf {
-    platform_root().join("packages")
+    if let Ok(value) = std::env::var("WASMNEST_LIB_ROOT") {
+        let path = PathBuf::from(&value);
+        assert!(
+            path.is_dir(),
+            "WASMNEST_LIB_ROOT 指向的目录不存在: {}（能力仓未按 R1 布局装配？）",
+            path.display()
+        );
+        return path;
+    }
+    let path = platform_root()
+        .parent()
+        .expect("平台仓根必有父目录")
+        .join("wasmnest-lib");
+    assert!(
+        path.is_dir(),
+        "能力仓目录不存在: {}（按 R1 布局把 wasmnest-lib 放在平台仓同级，\
+         或设置 WASMNEST_LIB_ROOT）",
+        path.display()
+    );
+    path
 }
 
 /// 某能力 crate 根：`<libRoot>/<crate_name>`（不存在即 panic，防空转）。
@@ -66,8 +84,7 @@ pub fn lib_crate_root(crate_name: &str) -> PathBuf {
     let dir = lib_root().join(crate_name);
     assert!(
         dir.is_dir(),
-        "能力 crate 目录不存在: {}（平台仓 packages/ submodule 未初始化？\
-         先 `git submodule update --init`）",
+        "能力 crate 目录不存在: {}（能力仓未按 R1 布局放置，或 crate 已改名/删除）",
         dir.display()
     );
     dir

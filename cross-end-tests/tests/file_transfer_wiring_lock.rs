@@ -399,9 +399,9 @@ fn shared_app_depends_on_desktop_sdk_only() {
 /// bump 即可（各自 host↔guest 自洽），不受本判据约束（ADR 0051 D3）。
 #[test]
 fn shared_artifact_ends_align_on_one_package_version() {
-    // 仓根真源（Rust 常量文件，票 03 单点化）
-    let source = fs::read_to_string(platform_root().join("packages/contracts/wasmnest-plugin-package.rs"))
-        .expect("读仓根契约包真源 contracts/wasmnest-plugin-package.rs");
+    // 契约真源（能力仓零依赖 crate 的常量文件，票 03 单点化）
+    let source = fs::read_to_string(repo_paths::lib_root().join("wasmnest-contract/src/lib.rs"))
+        .expect("读契约真源 <wasmnest-lib>/wasmnest-contract/src/lib.rs");
     let const_of = |name: &str| -> String {
         let needle = format!("pub const {name}: &str = \"");
         let start = source

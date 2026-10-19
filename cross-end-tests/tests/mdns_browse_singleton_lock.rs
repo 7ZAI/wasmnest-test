@@ -12,24 +12,24 @@
 //! file-transfer 互相发现失败的根因。
 //!
 //! 修复后全进程对同一服务类型只允许**类型中枢**
-//!（`packages/wasmnest-discovery-engine/src/type_hub.rs`）调用 `daemon.browse` /
+//!（`wasmnest-lib/wasmnest-discovery-engine/src/type_hub.rs`）调用 `daemon.browse` /
 //! `daemon.stop_browse`；守护实例本身仍只允许该 crate 的 `engine.rs` 创建一次。
 //! 本锁把这两条不变量变成可执行判据：谁把它们接回别处，测试直接红。
 //!
 //! ## 为什么锁在跨端测试仓
 //!
-//! 扫描面横跨**能力仓（`packages/**/src`）+ 双端宿主（`wasmnest-*/src-tauri/src`）**
-//! ——本仓经平台仓根同时看到两侧（能力仓经平台仓 `packages/` submodule 挂载，V1 布局）。
+//! 扫描面横跨**能力仓（`wasmnest-lib/*/src`）+ 双端宿主（`wasmnest-*/src-tauri/src`）**
+//! ——本仓经平台仓根同时看到两侧（能力仓为平台仓的兄弟目录 `../wasmnest-lib`）。
 //! 票 08 把锁自能力仓迁出；2026-10-18 跨端测试面独立成仓后，路径基准改为
-//! [`repo_paths::platform_root`]（标签仍为 `packages/<crate>/…` 与
-//! `wasmnest-{desktop,mobile}/…`，与拆仓前逐字一致）。
+//! [`repo_paths::platform_root`] 与 [`repo_paths::lib_root`]（标签为
+//! `wasmnest-lib/<crate>/…` 与 `wasmnest-{desktop,mobile}/…`）。
 //!
 //! ## 判据
 //!
 //! 1. `.browse(` / `.stop_browse(` **仅**允许出现在
-//!    `packages/wasmnest-discovery-engine/src/type_hub.rs`（中枢的唯一 browse 出口）；
+//!    `wasmnest-lib/wasmnest-discovery-engine/src/type_hub.rs`（中枢的唯一 browse 出口）；
 //! 2. `ServiceDaemon::new` **仅**允许出现在
-//!    `packages/wasmnest-discovery-engine/src/engine.rs`（共享守护唯一创建点）；
+//!    `wasmnest-lib/wasmnest-discovery-engine/src/engine.rs`（共享守护唯一创建点）；
 //! 3. **跳过纯注释行**（行首去空白后以 `//` 开头，含 `///` / `//!`）——文档里提到
 //!    `host-mdns.browse(service-type)` / `ServiceDaemon::new` 是合法散文，不是调用点。
 //!
@@ -52,13 +52,14 @@ const HOST_SRC_ROOTS: &[&str] = &[
     "wasmnest-mobile/src-tauri/src",
 ];
 
-/// 扫描文件数下限（实测 484：`packages/*/src` 312 + 桌面 53 + 移动 119；下调留余量）
+/// 扫描文件数下限（实测 484：能力仓 `wasmnest-lib/*/src` 312 + 桌面 53 + 移动 119；
+/// 下调留余量）
 const MIN_FILES: usize = 400;
 
 /// 哨兵文件：枚举失败 / 路径写错时防「清单为空 → 断言恒真」
 const SENTINEL_FILES: &[&str] = &[
-    "packages/wasmnest-discovery-engine/src/type_hub.rs",
-    "packages/wasmnest-discovery-engine/src/engine.rs",
+    "wasmnest-lib/wasmnest-discovery-engine/src/type_hub.rs",
+    "wasmnest-lib/wasmnest-discovery-engine/src/engine.rs",
     "wasmnest-desktop/src-tauri/src/lib.rs",
     "wasmnest-mobile/src-tauri/src/lib.rs",
 ];
@@ -67,13 +68,13 @@ const SENTINEL_FILES: &[&str] = &[
 ///
 /// 中枢是该服务类型 listener 槽的唯一所有者（建档 / 重查 / 后缘补齐都经它），
 /// 其它任何调用点都会覆盖同一槽位、静默杀死既有订阅者的事件流。
-const BROWSE_ALLOWLIST: &[&str] = &["packages/wasmnest-discovery-engine/src/type_hub.rs"];
+const BROWSE_ALLOWLIST: &[&str] = &["wasmnest-lib/wasmnest-discovery-engine/src/type_hub.rs"];
 
 /// `ServiceDaemon::new` 白名单（精确到文件）：唯一合法创建点 = 共享守护初始化。
 ///
 /// 进程内第二个守护会与共享守护争抢同类型 listener（多守护各有自己的槽表），
 /// 破坏「一个进程一个守护」的 ADR 0042 不变量。
-const DAEMON_NEW_ALLOWLIST: &[&str] = &["packages/wasmnest-discovery-engine/src/engine.rs"];
+const DAEMON_NEW_ALLOWLIST: &[&str] = &["wasmnest-lib/wasmnest-discovery-engine/src/engine.rs"];
 
 /// 浏览调用判据针脚（`.browse(` / `.stop_browse(` 同属浏览面）
 const BROWSE_NEEDLES: &[&str] = &[".browse(", ".stop_browse("];
@@ -125,10 +126,9 @@ fn scan_source(rel: &str, src: &str, needles: &[&str]) -> Vec<(String, usize, St
 
 /// 扫描文件清单（读盘 → [`scan_source`]），返回排序去重后的命中
 fn scan_files(files: &[String], needles: &[&str]) -> Vec<(String, usize, String)> {
-    let root = platform_root();
     let mut hits = Vec::new();
     for rel in files {
-        let src = read_file(&root.join(rel));
+        let src = read_file(&abs_path(rel));
         hits.extend(scan_source(rel, &src, needles));
     }
     hits.sort();
@@ -136,9 +136,19 @@ fn scan_files(files: &[String], needles: &[&str]) -> Vec<(String, usize, String)
     hits
 }
 
+/// 显示键 → 绝对路径：能力仓文件以 `wasmnest-lib/` 开头（经 `lib_root()` 解析，
+/// 尊重 `WASMNEST_LIB_ROOT`），宿主文件相对平台仓根。
+fn abs_path(rel: &str) -> PathBuf {
+    if let Some(lib_rel) = rel.strip_prefix("wasmnest-lib/") {
+        repo_paths::lib_root().join(lib_rel)
+    } else {
+        platform_root().join(rel)
+    }
+}
+
 /// 递归枚举目录下的 `.rs`，路径相对 `repo_root` 记为带 `/` 的正斜杠形态。
 ///
-/// `require_src_segment`：`packages/` 只收**位于 `src` 目录内**的文件（crate 源码面），
+/// `require_src_segment`：能力仓只收**位于 `src` 目录内**的文件（crate 源码面），
 /// 双端宿主 `src-tauri/src` 整树收。`target/` 构建产物一律跳过；锁自身文件跳过。
 fn walk(dir: &Path, repo_root: &Path, require_src_segment: bool, out: &mut Vec<String>) {
     let entries =
@@ -169,15 +179,20 @@ fn walk(dir: &Path, repo_root: &Path, require_src_segment: bool, out: &mut Vec<S
     }
 }
 
-/// 枚举全部扫描文件（能力仓 `packages/**/src`（经 submodule）+ 双端 `src-tauri/src`）
+/// 枚举全部扫描文件（能力仓 `wasmnest-lib/*/src` + 双端 `src-tauri/src`）
 fn collect_rs_files() -> Vec<String> {
-    // 标签基准统一取平台仓根：能力 crate 记为 `packages/<crate>/…`，宿主记为
-    // `wasmnest-{desktop,mobile}/src-tauri/src/…`（与拆仓前的能力仓标签逐字一致）。
-    let label_root = platform_root();
-    let mut out = Vec::new();
-    walk(&label_root.join("packages"), &label_root, true, &mut out);
+    // 能力 crate 标签统一记为 `wasmnest-lib/<crate>/…`（`lib_root()` 可被环境变量覆盖，
+    // 但显示键保持稳定，白名单/哨兵按同一形态比对）；宿主标签相对平台仓根。
+    let platform = platform_root();
+    let lib = repo_paths::lib_root();
+    let mut lib_files = Vec::new();
+    walk(&lib, &lib, true, &mut lib_files);
+    let mut out: Vec<String> = lib_files
+        .into_iter()
+        .map(|rel| format!("wasmnest-lib/{rel}"))
+        .collect();
     for rel in HOST_SRC_ROOTS {
-        walk(&label_root.join(rel), &label_root, false, &mut out);
+        walk(&platform.join(rel), &platform, false, &mut out);
     }
     out.sort();
     out

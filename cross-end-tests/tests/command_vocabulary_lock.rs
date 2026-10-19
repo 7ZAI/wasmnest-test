@@ -43,7 +43,7 @@ fn desktop_lifecycle_src() -> String {
 /// 桌面命令面 = 编排层（lifecycle.rs，六臂） + wasm-core api_bridge（preauth/activate/deactivate 等既有臂）
 fn desktop_srcs() -> String {
     let mut s = desktop_lifecycle_src();
-    let bridge = repo_root().join("packages/wasmnest-wasm-core/src/manager/host/api_bridge.rs");
+    let bridge = repo_paths::lib_root().join("wasmnest-wasm-core/src/manager/host/api_bridge.rs");
     s.push_str("\n");
     s.push_str(&std::fs::read_to_string(&bridge).unwrap_or_else(|e| panic!("读 api_bridge.rs 失败: {e}")));
     s

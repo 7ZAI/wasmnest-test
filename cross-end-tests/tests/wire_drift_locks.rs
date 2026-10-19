@@ -65,9 +65,9 @@ fn mobile_sdk_src(rel: &str) -> String {
     )
 }
 
-/// 能力仓内某 crate 的源文件（submodule mount：平台仓 `packages/` == 能力仓仓根）
+/// 能力仓内某 crate 的源文件（兄弟目录 `../wasmnest-lib` == 能力仓仓根）
 fn lib_file(crate_name: &str, rel: &str) -> String {
-    read_normalized(&repo_root().join("packages").join(crate_name).join(rel))
+    read_normalized(&repo_paths::lib_root().join(crate_name).join(rel))
 }
 
 /// 某能力 crate 的 `src/wire.rs`（副本比对对象）

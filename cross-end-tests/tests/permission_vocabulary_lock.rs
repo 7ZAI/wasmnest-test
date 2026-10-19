@@ -211,7 +211,7 @@ fn every_permission_has_an_enforcement_point() {
     // 落点）。移动宿主不开桌面专属域，其门禁经 wasm-core 同一路径（原锁同口径）。
     let root = repo_root();
     let mut files = Vec::new();
-    collect_rs(&root.join("packages/wasmnest-wasm-core/src"), &mut files);
+    collect_rs(&repo_paths::lib_root().join("wasmnest-wasm-core/src"), &mut files);
     collect_rs(&root.join("wasmnest-desktop/src-tauri/src"), &mut files);
     assert!(files.len() > 20, "宿主插件源码文件数异常，扫描未生效");
 
