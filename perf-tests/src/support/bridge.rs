@@ -14,6 +14,7 @@ use std::time::Instant;
 use serde_json::json;
 use wasmnest_desktop_lib::wasm_core::storage::PluginStorage;
 use wasmnest_desktop_lib::wasm_core::PluginHost;
+use wasmnest_wasm_core::config::CallModel;
 
 /// bench 夹具的 wasm 目标三元组（与其它 fixture 一致）
 const WASM_TARGET: &str = "wasm32-wasip3";
@@ -54,6 +55,48 @@ impl BenchEnv {
             self.http_port,
             self.temp_root.display()
         )
+    }
+
+    /// 宿主句柄（M2 队列饱和场景需要并发投递 + 可被 move 的任务）
+    pub fn host(&self) -> Arc<PluginHost> {
+        Arc::clone(&self.host)
+    }
+
+    /// 临时根（M3 异步进程输出路径等）
+    pub fn temp_root(&self) -> &Path {
+        &self.temp_root
+    }
+
+    /// 切换主实例调用模型（`Mutex` / `EventLoop`）。
+    ///
+    /// 调用模型是**实例级快照**，热切不会生效；这里按生产重建路径走：
+    /// 停用 → 从同一产物重新加载实例 → 按目标模型装表 → 重新激活。
+    /// 对端实例不动，避免把「模型切换」和「夹具重启」混成一个变量。
+    pub async fn switch_main_model(&self, model: CallModel) -> anyhow::Result<()> {
+        let _ = self.host.deactivate_plugin(MAIN_ID, false).await;
+
+        let wasm_path = self
+            .temp_root
+            .join("plugins")
+            .join(MAIN_ID)
+            .join(format!("{FIXTURE_LIB}.wasm"));
+        let plugin = self
+            .host
+            .wasm_runtime()
+            .load_plugin_from_file(
+                &wasm_path,
+                MAIN_ID,
+                Arc::clone(self.host.wasm_host_ctx()),
+                &[],
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("重新加载主实例失败: {e}"))?;
+        self.host.install_instance(MAIN_ID, plugin, model).await;
+        self.host
+            .activate_plugin(MAIN_ID, false)
+            .await
+            .map_err(|e| anyhow::anyhow!("按 {model:?} 模型重新激活主实例失败: {e}"))?;
+        Ok(())
     }
 
     /// 经生产同形命令面下发一条命令（`plugin_invoke` 的内核：`invoke_rust_command`）

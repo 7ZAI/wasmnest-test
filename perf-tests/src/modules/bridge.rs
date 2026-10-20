@@ -13,14 +13,17 @@
 //!   周期定时器回调
 //! - **G 并发**：同一实例的并发命令扇出（实例锁串行化的直接证据），
 //!   以及「慢调用是否堵死同实例全部交互」的量化（G2）
+//! - **M 调用矩阵**：单 Store 载荷尺寸 × 并发、event-loop 属主队列饱和、
+//!   异步进程并发、mutex vs event-loop 同负载对照
 //!
 //! 每个测点都带**行为断言**（收到的字节数、调用次数、计数增量），不只是计时——
 //! 基准数字建立在「确实跑对了」之上（同 `unit-test-discipline` 的门禁精神）。
 
 use crate::report::Report;
 use crate::report::{arg_usize, mib_per_sec, micros, ns_per_byte, Cmp};
-use crate::support::bridge::{BenchEnv, BUS_BIN_TOPIC, BUS_JSON_TOPIC};
+use crate::support::bridge::{BenchEnv, BUS_BIN_TOPIC, BUS_JSON_TOPIC, MAIN_ID};
 use serde_json::json;
+use wasmnest_wasm_core::config::CallModel;
 
 /// 场景执行体（boxed future：场景函数都是 async，但列表要能按值持有）
 pub type ScenarioRun<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + 'a>>;
@@ -202,6 +205,34 @@ pub fn all() -> Vec<Scenario> {
             title: "周期定时器回调（host-timer）",
             smoke: false,
             run: |env, iters, rep| Box::pin(f2_timer(env, iters, rep)),
+        },
+        Scenario {
+            id: "M1",
+            group: "M",
+            title: "单 Store 串行载荷矩阵（尺寸 × 并发）",
+            smoke: false,
+            run: |env, iters, rep| Box::pin(m1_payload_matrix(env, iters, rep)),
+        },
+        Scenario {
+            id: "M2",
+            group: "M",
+            title: "event-loop 属主队列饱和（64）",
+            smoke: false,
+            run: |env, iters, rep| Box::pin(m2_owner_queue_saturation(env, iters, rep)),
+        },
+        Scenario {
+            id: "M3",
+            group: "M",
+            title: "异步进程并发提交与完成",
+            smoke: false,
+            run: |env, iters, rep| Box::pin(m3_async_process_concurrency(env, iters, rep)),
+        },
+        Scenario {
+            id: "M4",
+            group: "M",
+            title: "mutex vs event-loop 同负载对照",
+            smoke: false,
+            run: |env, iters, rep| Box::pin(m4_call_model_comparison(env, iters, rep)),
         },
     ]
 }
@@ -1169,7 +1200,462 @@ async fn g2_slow_call_blocks_instance(env: &BenchEnv, iters: usize, rep: &mut Re
     Ok(())
 }
 
+// ==================== M · wasm-core 调用矩阵 ====================
+
+/// M1：单 Store 串行载荷矩阵。
+///
+/// 同一实例上的调用被实例锁串行化；这里把「载荷尺寸」和「并发投递数」交叉，
+/// 看固定开销、每字节成本与排队放大是否线性。`echo` 是命令面 JSON 字符串，
+/// `storage-rt` 是 KV 字符串路径，两种“类型”都保留。
+async fn m1_payload_matrix(env: &BenchEnv, iters: usize, rep: &mut Report) -> anyhow::Result<()> {
+    const SIZES: [usize; 4] = [0, 1024, 65_536, 1_048_576];
+    const FANOUTS: [usize; 3] = [1, 8, 64];
+    let mut failures = 0usize;
+
+    for size in SIZES {
+        for fanout in FANOUTS {
+            env.call_main("bench.echo", json!({ "bytes": size })).await?;
+            let mut per_call = Vec::with_capacity(iters);
+            for _ in 0..iters {
+                let started = std::time::Instant::now();
+                let calls = (0..fanout).map(|_| env.call_timed("bench.echo", json!({ "bytes": size })));
+                let results = futures_util::future::join_all(calls).await;
+                let total = started.elapsed();
+                for result in results {
+                    match result {
+                        Ok((value, _)) if arg_usize(&value, "bytes") == size => {}
+                        Ok((value, _)) => {
+                            failures += 1;
+                            eprintln!("[bridge] M1 echo {size} B 回显不符: {value}");
+                        }
+                        Err(error) => {
+                            failures += 1;
+                            eprintln!("[bridge] M1 echo {size} B 失败: {error:#}");
+                        }
+                    }
+                }
+                per_call.push(micros(total) / fanout as f64);
+            }
+            rep.record(
+                &format!("M1.echo-{size}-f{fanout}"),
+                "M 调用矩阵",
+                &format!("echo {size} B × {fanout} 并发（摊每次）"),
+                "µs",
+                per_call,
+                "同实例串行锁；含编解码与调度",
+            );
+        }
+    }
+
+    for size in [1024usize, 65_536, 1_048_576] {
+        for fanout in [1usize, 8] {
+            env.call_main("bench.storage-rt", json!({ "key": "m1.warm", "bytes": size }))
+                .await?;
+            let mut per_call = Vec::with_capacity(iters);
+            for round in 0..iters {
+                let started = std::time::Instant::now();
+                let calls = (0..fanout).map(|i| {
+                    env.call_timed(
+                        "bench.storage-rt",
+                        json!({ "key": format!("m1.{size}.{fanout}.{round}.{i}"), "bytes": size }),
+                    )
+                });
+                let results = futures_util::future::join_all(calls).await;
+                let total = started.elapsed();
+                for result in results {
+                    match result {
+                        Ok((value, _)) if arg_usize(&value, "readBytes") == size => {}
+                        Ok((value, _)) => {
+                            failures += 1;
+                            eprintln!("[bridge] M1 storage {size} B 读回不符: {value}");
+                        }
+                        Err(error) => {
+                            failures += 1;
+                            eprintln!("[bridge] M1 storage {size} B 失败: {error:#}");
+                        }
+                    }
+                }
+                per_call.push(micros(total) / fanout as f64);
+            }
+            rep.record(
+                &format!("M1.storage-{size}-f{fanout}"),
+                "M 调用矩阵",
+                &format!("storage {size} B × {fanout} 并发（摊每次）"),
+                "µs",
+                per_call,
+                "KV 读写路径；同实例串行",
+            );
+        }
+    }
+
+    rep.record(
+        "M1.failures",
+        "M 调用矩阵",
+        "载荷矩阵失败数",
+        "个",
+        vec![failures as f64],
+        "回显/读回不符或调用失败",
+    );
+    rep.budget("M1.failures", "载荷矩阵不得失败", failures as f64, 1.0, "个", Cmp::Less);
+    rep.budget(
+        "M1.echo-1048576-f64",
+        "1 MiB × 64 并发单次不得数量级变慢",
+        median(&measurement_samples(rep, "M1.echo-1048576-f64")),
+        20_000.0,
+        "µs",
+        Cmp::Less,
+    );
+    rep.budget(
+        "M1.storage-1048576-f8",
+        "1 MiB KV × 8 并发单次不得数量级变慢",
+        median(&measurement_samples(rep, "M1.storage-1048576-f8")),
+        100_000.0,
+        "µs",
+        Cmp::Less,
+    );
+    Ok(())
+}
+
+/// M2：event-loop 属主队列饱和。
+///
+/// 先让一个慢调用占住属主，再一次性投递 `cap + extra` 条 nop；前 `cap` 条
+/// 入队，其余必须立即 `queue is full`。这条测的是**有界失败**，不是吞吐。
+async fn m2_owner_queue_saturation(env: &BenchEnv, _iters: usize, rep: &mut Report) -> anyhow::Result<()> {
+    env.switch_main_model(CallModel::EventLoop).await?;
+    let cap = wasmnest_wasm_core::test_support::owner_queue_cap();
+    let extra = 16usize;
+    env.call_main("bench.reset", json!({})).await?;
+
+    // 慢调用占住属主：4 MiB KV 足够覆盖一轮 80 条 nop 的投递窗口
+    let host = env.host();
+    let slow = tokio::spawn(async move {
+        host.invoke_rust_command(
+            MAIN_ID,
+            "bench.storage-rt",
+            json!({ "key": "m2.slow", "bytes": 4 * 1024 * 1024 }),
+        )
+        .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+    let started = std::time::Instant::now();
+    let calls = (0..cap + extra).map(|_| {
+        let started = std::time::Instant::now();
+        async move {
+            let result = env.call_main("bench.nop", json!({})).await;
+            (result, started.elapsed())
+        }
+    });
+    let results = futures_util::future::join_all(calls).await;
+    let total_ms = micros(started.elapsed()) / 1000.0;
+
+    let mut ok = 0usize;
+    let mut rejected = 0usize;
+    let mut other = 0usize;
+    let mut ok_latency = Vec::new();
+    let mut reject_latency = Vec::new();
+    for (result, duration) in results {
+        match result {
+            Ok(_) => {
+                ok += 1;
+                ok_latency.push(micros(duration));
+            }
+            Err(error) if error.to_string().contains("queue is full") => {
+                rejected += 1;
+                reject_latency.push(micros(duration));
+            }
+            Err(error) => {
+                other += 1;
+                rep.failures.push(format!("M2: nop 非队列满失败: {error:#}"));
+            }
+        }
+    }
+
+    let slow_result = slow
+        .await
+        .map_err(|e| anyhow::anyhow!("M2 慢调用任务异常: {e}"))?;
+    let slow_value = slow_result.map_err(|e| anyhow::anyhow!("M2 慢调用失败: {e}"))?;
+    anyhow::ensure!(
+        arg_usize(&slow_value, "readBytes") == 4 * 1024 * 1024,
+        "M2 慢调用读回不足: {slow_value}"
+    );
+
+    rep.record(
+        "M2.burst-total",
+        "M 调用矩阵",
+        &format!("队列饱和：{cap}+{extra} 条 nop 总耗时"),
+        "ms",
+        vec![total_ms],
+        "慢调用占住属主后的投递窗口",
+    );
+    rep.record(
+        "M2.ok",
+        "M 调用矩阵",
+        "入队并服务数",
+        "个",
+        vec![ok as f64],
+        "有界预算内不得丢请求",
+    );
+    rep.record(
+        "M2.rejected",
+        "M 调用矩阵",
+        "队列满拒绝数",
+        "个",
+        vec![rejected as f64],
+        &format!("容量 {cap}，超出部分必须 fail-visible"),
+    );
+    rep.record(
+        "M2.other-failures",
+        "M 调用矩阵",
+        "非队列满失败数",
+        "个",
+        vec![other as f64],
+        "应为 0",
+    );
+    rep.record(
+        "M2.ok-latency",
+        "M 调用矩阵",
+        "入队请求延迟",
+        "µs",
+        ok_latency,
+        "包含等待慢调用释放的时间",
+    );
+    rep.record(
+        "M2.reject-latency",
+        "M 调用矩阵",
+        "拒绝请求延迟",
+        "µs",
+        reject_latency,
+        "应立即返回，不排队",
+    );
+
+    rep.budget(
+        "M2.ok",
+        "入队成功数不得超过属主队列容量",
+        ok as f64,
+        (cap as f64) + 0.5,
+        "个",
+        Cmp::Less,
+    );
+    rep.budget(
+        "M2.rejected",
+        "超出容量的请求必须有界失败",
+        rejected as f64,
+        (extra as f64) - 0.5,
+        "个",
+        Cmp::Greater,
+    );
+    rep.budget("M2.other-failures", "只允许队列满错误", other as f64, 1.0, "个", Cmp::Less);
+    Ok(())
+}
+
+/// M3：异步进程并发提交与完成。
+///
+/// `process.run` 立即返回 run-id，终态走 `on_process_done` 回调；这里测
+/// 1 / 4 / 8 路并发提交的 submit 延迟与全部完成时间，和 F1 的单次对照。
+async fn m3_async_process_concurrency(env: &BenchEnv, _iters: usize, rep: &mut Report) -> anyhow::Result<()> {
+    env.switch_main_model(CallModel::Mutex).await?;
+
+    for n in [1usize, 4, 8] {
+        env.call_main("bench.reset", json!({})).await?;
+        let script = "head -c 200000 /dev/zero | tr '\\0' a";
+        let outputs: Vec<String> = (0..n)
+            .map(|i| {
+                env.temp_root()
+                    .join(format!("m3-{n}-{i}.out"))
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+
+        let started = std::time::Instant::now();
+        let calls = (0..n).map(|i| {
+            env.call_timed(
+                "bench.proc-async",
+                json!({ "script": script, "outputPath": outputs[i] }),
+            )
+        });
+        let results = futures_util::future::join_all(calls).await;
+        let mut submit = Vec::with_capacity(n);
+        let mut failures = 0usize;
+        for result in results {
+            match result {
+                Ok((value, duration)) => {
+                    if value.get("runId").and_then(|v| v.as_str()).is_none() {
+                        failures += 1;
+                        eprintln!("[bridge] M3 proc-async 缺少 runId: {value}");
+                    }
+                    submit.push(micros(duration));
+                }
+                Err(error) => {
+                    failures += 1;
+                    eprintln!("[bridge] M3 proc-async 提交失败: {error:#}");
+                }
+            }
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut done: usize;
+        loop {
+            let counters = env.call_main("bench.counters", json!({})).await?;
+            done = counters.get("processDone").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if done >= n {
+                break;
+            }
+            anyhow::ensure!(
+                std::time::Instant::now() < deadline,
+                "M3 {n} 路进程完成超时: {done}/{n}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let complete_ms = micros(started.elapsed()) / 1000.0;
+
+        rep.record(
+            &format!("M3.submit-{n}"),
+            "M 调用矩阵",
+            &format!("{n} 路 proc-async 提交"),
+            "µs",
+            submit,
+            "立即返回 run-id 的提交往返",
+        );
+        rep.record(
+            &format!("M3.complete-{n}"),
+            "M 调用矩阵",
+            &format!("{n} 路进程全部完成"),
+            "ms",
+            vec![complete_ms],
+            "提交到 processDone 计数达标",
+        );
+        rep.record(
+            &format!("M3.failures-{n}"),
+            "M 调用矩阵",
+            &format!("{n} 路提交失败数"),
+            "个",
+            vec![failures as f64],
+            "应为 0",
+        );
+        rep.budget(
+            &format!("M3.failures-{n}"),
+            "异步进程提交不得失败",
+            failures as f64,
+            1.0,
+            "个",
+            Cmp::Less,
+        );
+        rep.budget(
+            &format!("M3.submit-{n}"),
+            "异步进程提交不得数量级变慢",
+            median(&measurement_samples(rep, &format!("M3.submit-{n}"))),
+            50_000.0,
+            "µs",
+            Cmp::Less,
+        );
+        rep.budget(
+            &format!("M3.complete-{n}"),
+            "异步进程完成不得数量级变慢",
+            complete_ms,
+            10_000.0,
+            "ms",
+            Cmp::Less,
+        );
+    }
+    Ok(())
+}
+
+/// M4：mutex vs event-loop 同负载对照。
+///
+/// 同一份组件、同一份 1 MiB KV 负载，分别按两种调用模型跑 2 / 4 路并发。
+/// 两种模型都不承诺同实例并行（wasmtime 实例门），这里量的是模型开销差。
+async fn m4_call_model_comparison(env: &BenchEnv, iters: usize, rep: &mut Report) -> anyhow::Result<()> {
+    let mut mutex_f4 = 0.0f64;
+    let mut eventloop_f4 = 0.0f64;
+
+    for model in [CallModel::Mutex, CallModel::EventLoop] {
+        env.switch_main_model(model).await?;
+        for fanout in [2usize, 4] {
+            let warm_key = format!("m4.warm.{model:?}");
+            env.call_main("bench.storage-rt", json!({ "key": warm_key, "bytes": 1_048_576 }))
+                .await?;
+
+            let mut totals = Vec::with_capacity(iters);
+            for round in 0..iters {
+                let started = std::time::Instant::now();
+                let calls = (0..fanout).map(|i| {
+                    env.call_timed(
+                        "bench.storage-rt",
+                        json!({
+                            "key": format!("m4.{model:?}.{fanout}.{round}.{i}"),
+                            "bytes": 1_048_576
+                        }),
+                    )
+                });
+                let results = futures_util::future::join_all(calls).await;
+                for result in results {
+                    let (value, _) = result?;
+                    anyhow::ensure!(
+                        arg_usize(&value, "readBytes") == 1_048_576,
+                        "M4 {model:?} 读回不足: {value}"
+                    );
+                }
+                totals.push(micros(started.elapsed()) / 1000.0);
+            }
+
+            let med = median(&totals);
+            if fanout == 4 {
+                match model {
+                    CallModel::Mutex => mutex_f4 = med,
+                    CallModel::EventLoop => eventloop_f4 = med,
+                }
+            }
+            rep.record(
+                &format!("M4.{model:?}-f{fanout}"),
+                "M 调用矩阵",
+                &format!("{model:?} × {fanout} 路 1 MiB KV（总耗时）"),
+                "ms",
+                totals,
+                "同实例串行；两种模型对照",
+            );
+            rep.budget(
+                &format!("M4.{model:?}-f{fanout}"),
+                "调用模型并发总耗时不得数量级变慢",
+                med,
+                1_000.0,
+                "ms",
+                Cmp::Less,
+            );
+        }
+    }
+
+    let ratio = eventloop_f4 / mutex_f4.max(1e-9);
+    rep.record(
+        "M4.eventloop-vs-mutex",
+        "M 调用矩阵",
+        "event-loop / mutex（4 路 1 MiB）",
+        "×",
+        vec![ratio],
+        "< 1 表示 event-loop 更快；两者都不放开同实例并行",
+    );
+    rep.budget(
+        "M4.eventloop-vs-mutex",
+        "event-loop 不得比 mutex 慢一个量级",
+        ratio,
+        10.0,
+        "×",
+        Cmp::Less,
+    );
+    Ok(())
+}
+
 // ==================== 统计助手 ====================
+
+/// 取回刚记录到报告里的测点样本（门禁用中位数，避免场景内另存一份）。
+fn measurement_samples(rep: &Report, id: &str) -> Vec<f64> {
+    rep.measurements
+        .iter()
+        .find(|m| m.id == id)
+        .map(|m| m.samples.clone())
+        .unwrap_or_default()
+}
 
 fn median(samples: &[f64]) -> f64 {
     if samples.is_empty() {
