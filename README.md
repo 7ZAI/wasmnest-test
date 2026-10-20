@@ -34,6 +34,11 @@
 
 两种形态都有**台子自检**：场景红了先证明台子没坏（服务器已按 GUI bootstrap 同一装配面装好端口、移动端目标地址可回读、真实插件确实在处理请求、停机后端口确实释放）。
 
+> **设备层不在本仓**：双端 UI 端到端（桌面脚本点击 + USB 真机 adb / WebView CDP 点击与断言）住应用仓
+> `wasmnest-apps/e2e/dual/`，入口 `node scripts/e2e-dual.mjs --app bedcode`，说明见其 `docs/E2E.md` §10。
+> 本仓刻意保持零设备依赖：默认 `cargo test` 在无真机、无 GUI 的机器上必须能跑；设备套件是另一层回归（nightly / 发布前），
+> 不应把「没插手机」变成协议层测试的红或静默 skip。
+
 ## 场景与锁
 
 ### 互连场景

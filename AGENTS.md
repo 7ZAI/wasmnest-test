@@ -18,6 +18,7 @@
 
 - **工程本体**：`cross-end-tests/` —— Cargo workspace（根 `Cargo.toml`）：主包（互连测试：`tests/` 下 `wire_drift_locks` / `permission_vocabulary_lock` / `mdns_browse_singleton_lock` 等）+ `desktop-harness`（桌面侧测试夹具二进制）。目标构建见各 crate `.cargo/config.toml` / 头注释。
 - **性能基准**：`perf-tests/` —— 独立 Cargo workspace（`perf-harness` 二进制 + `perf_tests` 库）：`bridge` 模块（迁移自平台仓 `wasm_bridge_bench`）+ `apps` 模块（四个随包真实应用）。用法 / 场景 / 门禁见 [`perf-tests/README.md`](perf-tests/README.md)，术语见 [`perf-tests/GLOSSARY.md`](perf-tests/GLOSSARY.md)，决策见 `perf-tests/docs/adr/`。
+- **双端 UI E2E 不在此处**：桌面脚本点击 + USB 真机（adb 反向端口 + WebView CDP 触摸/断言）的端到端套件住应用仓 `wasmnest-apps/e2e/dual/`（入口 `node scripts/e2e-dual.mjs --app bedcode`，说明见其 `docs/E2E.md` §10）。本仓不加设备依赖：默认 `cargo test` 必须在无真机 / 无 GUI 的机器上可跑，设备套件是 nightly / 发布前的另一层回归。
 - **跨仓路径铁律**：测试工程的能力仓依赖**必须**经同级兄弟目录 `../wasmnest-lib/<crate>`——平台双端宿主的 path 依赖写死 `../../../wasmnest-lib/<crate>`，指到同一物理路径才能保证能力 crate 只有一份（类型同一性）；平台仓不再挂 `packages/` submodule。能力仓根经 `tests/common/repo_paths.rs::lib_root()` 解析（`WASMNEST_LIB_ROOT` 可覆盖，fail-visible），平台仓根经 `platform_root()`，应用仓经 `tests/common/app_paths.rs`；perf-tests 用同一套 resolver 语义（`src/support/repo_paths.rs`）。
 - 任务路由：改传输 / 认证 / 配对面 → 平台仓 docs/architecture.md §6 + 本仓对应测试头注释；改互连测试 → 本仓各测试头注释 + 平台仓对应锁；改桥接原语或应用命令 → perf-tests 对应模块，数字变化写入报告环境快照。
 
