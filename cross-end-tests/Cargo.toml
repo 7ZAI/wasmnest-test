@@ -184,5 +184,9 @@ debug-assertions = false
 # `wasmnest-plugin-api` 进入解析图；patch 指回工作树 SDK（版本必须与 lib 声明一致）。
 # `--no-default-features --features two-proc`（桌面宿主整体出图）下该依赖不在解析图，
 # cargo 会给出「patch 未被使用」warning —— 属预期（不可按 feature 条件化 patch）。
+# 注：此处 `packages/` 是**已发布插件 SDK 的在位路径**（平台仓删的是根 `packages/`
+# submodule 挂载点，能力 crate 已迁 `../wasmnest-lib`；SDK 不属能力 crate、仍在原位）。
+# 全仓仅剩本处与 perf-tests 两处该引用——SDK 若搬迁，两处必须同批改，
+# 否则 desktop 模式在依赖解析期直接红。
 [patch.crates-io]
 wasmnest-plugin-api = { path = "../../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/rust" }

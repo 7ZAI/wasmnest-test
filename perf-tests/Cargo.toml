@@ -61,5 +61,9 @@ debug-assertions = false
 # ==================== [patch] 本地 SDK 指回 ====================
 # 桌面宿主随包插件走 `desktop-assembly`，会声明已发布的 wasmnest-plugin-api；
 # patch 指回工作树，避免解析出 crates.io 的第二份 SDK（类型同一性）。
+# 注：此处 `packages/` 是**已发布插件 SDK 的在位路径**（平台仓删除的是根 `packages/`
+# submodule 挂载点，能力 crate 已迁 `../wasmnest-lib`；SDK 不属能力 crate、仍在原位）。
+# 全仓仅剩 cross-end-tests / perf-tests 两处该引用——SDK 若搬迁，两处必须同批改，
+# 否则两种构建模式都会在依赖解析期直接红。
 [patch.crates-io]
 wasmnest-plugin-api = { path = "../../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/rust" }
