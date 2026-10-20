@@ -1,6 +1,7 @@
 //! 性能测试统一入口。
 //!
-//! 默认 smoke（秒级）；`--full` 跑完整矩阵。模块用 `--module` 选择。
+//! 默认 smoke（秒级）；`--full` 跑完整矩阵。模块用 `--module` 选择
+//! （bridge / boundary / apps）。
 //! 性能测量只允许 release 构建：debug 数值没有产品意义，`--allow-debug`
 //! 仅用于开发 harness 本身。
 
@@ -8,7 +9,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use perf_tests::env::Environment;
-use perf_tests::modules::{apps, bridge};
+use perf_tests::modules::{apps, boundary, bridge};
 use perf_tests::report::Report;
 use perf_tests::support::repo_paths;
 
@@ -43,6 +44,12 @@ fn main() -> ExitCode {
                 println!("  [{group}] {id:<28} {title}");
             }
         }
+        if modules.boundary {
+            println!("[boundary] 宿主规模 / 前端注册表投影边界");
+            for (id, group, title) in boundary::list() {
+                println!("  [{group}] {id:<28} {title}");
+            }
+        }
         if modules.apps {
             println!("[apps] 真实业务应用");
             for (id, group, title) in apps::list() {
@@ -55,7 +62,7 @@ fn main() -> ExitCode {
     if cfg!(debug_assertions) && !allow_debug {
         eprintln!(
             "[perf] 拒绝在 debug 构建下测量：数字不代表产品。\n\
-             [perf]   cargo run --release --bin perf-harness -- [--full] [--module bridge|apps|all]\n\
+             [perf]   cargo run --release --bin perf-harness -- [--full] [--module bridge|boundary|apps|all]\n\
              [perf] 仅开发 harness 本身时可加 --allow-debug。"
         );
         return ExitCode::FAILURE;
@@ -87,6 +94,12 @@ fn main() -> ExitCode {
         if let Err(e) = rt.block_on(bridge::run(full, iters, group_filter.as_deref(), &mut report)) {
             eprintln!("[perf] bridge 模块失败: {e:#}");
             report.failures.push(format!("bridge: {e:#}"));
+        }
+    }
+    if modules.boundary {
+        if let Err(e) = rt.block_on(boundary::run(full, iters, group_filter.as_deref(), &mut report)) {
+            eprintln!("[perf] boundary 模块失败: {e:#}");
+            report.failures.push(format!("boundary: {e:#}"));
         }
     }
     if modules.apps {
@@ -138,6 +151,7 @@ fn init_tracing() {
 #[derive(Clone, Copy)]
 struct Modules {
     bridge: bool,
+    boundary: bool,
     apps: bool,
 }
 
@@ -146,18 +160,26 @@ impl Modules {
         match value.to_ascii_lowercase().as_str() {
             "all" => Ok(Self {
                 bridge: true,
+                boundary: true,
                 apps: true,
             }),
             "bridge" => Ok(Self {
                 bridge: true,
+                boundary: false,
+                apps: false,
+            }),
+            "boundary" | "scale" => Ok(Self {
+                bridge: false,
+                boundary: true,
                 apps: false,
             }),
             "apps" => Ok(Self {
                 bridge: false,
+                boundary: false,
                 apps: true,
             }),
             other => Err(format!(
-                "未知模块 {other}；可用：all / bridge / apps（services / crossend 为第二批）"
+                "未知模块 {other}；可用：all / bridge / boundary / apps（services / crossend 为第二批）"
             )),
         }
     }

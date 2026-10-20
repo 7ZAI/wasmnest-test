@@ -7,6 +7,7 @@
 //! 模块：
 //! - `bridge`：wasm ↔ 宿主 ↔ 前端命令面（迁移自平台仓 `wasm_bridge_bench`）；
 //! - `apps`：四款真实业务应用的装载 / 激活 / 本地命令；
+//! - `boundary`：宿主规模（N 个实例同时常驻）与宿主 → 前端注册表投影边界；
 //! - `report` / `env` / `support`：取数、环境快照、路径与夹具装配。
 //!
 //! spec：本仓 README 与 `docs/adr/0001-perf-benchmarks-live-in-test-repo.md`。

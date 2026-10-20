@@ -20,7 +20,7 @@ const WASM_TARGET: &str = "wasm32-wasip3";
 /// 产物 profile（fixture 一律 release，`opt-level="s" / lto=true`）
 const WASM_PROFILE: &str = "release";
 /// 夹具 crate 名（cdylib 产物名 = 包名下划线形式）
-const FIXTURE_LIB: &str = "wasmnest_plugin_bench_test";
+pub(crate) const FIXTURE_LIB: &str = "wasmnest_plugin_bench_test";
 /// wasip3 工具链 pin（单一事实来源 =
 /// `../../wasmnest-lib/wasmnest-wasm-core/src/manager/runtime.rs::WASIP3_NIGHTLY`，
 /// 与 `packages/.cargo/config.toml` 注释互指；可用环境变量覆盖以便跟随工具链迁移）
@@ -257,7 +257,10 @@ fn fixtures_target_dir() -> PathBuf {
 }
 
 /// 编译 bench 夹具组件（源码/SDK/WIT 变更即重建；产物 mtime 判定）
-fn build_fixture_component() -> anyhow::Result<PathBuf> {
+///
+/// 规模边界模块复用同一份产物：同一组件多属主是「N 个应用同时常驻」最便宜的
+/// 合成形态，且不会被真实业务数据增长干扰。
+pub(crate) fn build_fixture_component() -> anyhow::Result<PathBuf> {
     let toolchain = std::env::var("BENCH_WASIP3_TOOLCHAIN").unwrap_or_else(|_| WASIP3_TOOLCHAIN.to_string());
     let packages_dir = desktop_root().join("packages");
     let plugin_dir = packages_dir.join("plugin-bench-test");

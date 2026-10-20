@@ -6,3 +6,4 @@ pub mod home;
 pub mod host;
 pub mod repo_paths;
 pub mod rss;
+pub mod scale_env;
