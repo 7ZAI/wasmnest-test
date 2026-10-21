@@ -97,6 +97,7 @@ cargo run --release --bin perf-harness -- --list  # 场景清单
 | Rust / sccache | Rust stable；`.cargo/config.toml` 强制 `sccache`，未安装时 cargo 直接失败 |
 | 终端环境 | 终端流场景使用真实 `bash` PTY，需要类 Unix 环境 |
 | 应用依赖 | 构建应用产物前，应用仓各 app 工程需先完成 `pnpm install` |
+| mDNS 环境 | `mdns_health_flow` 要求**同机没有第二个 WasmNest 桌面实例在跑**（实例名同为 `WasmNest-<机器名>` → mDNS 冲突 / 发现缓存互相覆盖，共享开发机上该场景会竞态 flaky）。隔离办法与根因见该测试头注释 |
 
 非标准布局可用环境变量覆盖：
 

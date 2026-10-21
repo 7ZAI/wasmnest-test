@@ -15,6 +15,41 @@
 //! 既不广播（票面观察到的现象），`/api/health` 还会报默认端口 8765 而不是真实端口。
 //! 本文件因此走 supervisor 同款启动，断言的是生产真实发生的那三件事。
 //!
+//! ## 环境要求：同机不得有第二个 WasmNest 桌面实例在跑
+//!
+//! 本场景用 mDNS 做「发现」，而 mDNS 的**实例名** = `WasmNest-<device_name>`，
+//! `device_name` 取系统信息端口（宿主壳代理 = 机器名）。同机跑着**真桌面端**
+//! （`pnpm run tauri:dev` 常态）时，它广播的实例名与本 rig **逐字相同**：
+//!
+//! 1. 两个应答者抢同一实例名 → RFC 6762 冲突处理把**后到的一方改名**
+//!    （rig 侧实测被改成 `WasmNest-<host> (2)._wasmnest._tcp.local.`）；
+//! 2. 移动端发现缓存按 `instance_name` 建 `HashMap`（`MdnsDiscovery::services`），
+//!    同名记录**互相覆盖**——先到先得，后到覆盖先到；
+//! 3. 两个记录的 TXT 逐字相同（`device_name` / `platform` / `version` 全一致，
+//!    改名只改实例名不改 TXT），故**按 TXT 挑不出哪条是 rig 自己的**。
+//!
+//! 后果：本场景在共享主机上**竞态 flaky**（实测同机复跑：一次红、一次绿）——
+//! 绿的那次是 rig 的记录先落进缓存、红的那次是真桌面端的记录覆盖了它。
+//! 这不是协议缺陷：rig 自己的广播记录本身完全正确
+//! （实测 `port=<rig 端口> / platform=desktop / device_name=WasmNest-<host> / version=<应用版本>`）。
+//!
+//! **判定口径**：本场景要求**同机无其它 WasmNest 桌面实例在跑**
+//! （CI / 干净开发机满足；共享开发机请先关掉桌面端，或用网络命名空间隔离——
+//! 隔离后组播不跨命名空间，真桌面端的广播看不见，rig 自发自收）：
+//!
+//! ```bash
+//! cargo test --test mdns_health_flow --no-run      # 取已构建的测试二进制路径
+//! unshare -rn bash -c \
+//!   'ip link set lo up; ip link set lo multicast on; ./target/debug/deps/mdns_health_flow-<hash>'
+//! ```
+//!
+//! （实测：同一二进制在隔离命名空间下稳定通过。）
+//!
+//! ⚠ **不得**为了「在共享主机上稳定绿」而放宽本文件的断言
+//! （例如把记录选择判据从 TXT 换成 rig 端口）——那会让端口断言退化为
+//! 选择条件、失去钉住力。共享主机的正解是**隔离环境**（上条命令），
+//! 不是改断言。
+
 //! ## 行为契约（unit-test-discipline G1：每条有来源）
 //!
 //! | 契约 | 来源（代码证据） | 行为 | 场景 |

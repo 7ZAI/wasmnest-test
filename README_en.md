@@ -92,6 +92,7 @@ Scenario matrix, budgets, headless assembly semantics and `--compare` usage live
 | Rust / sccache | Rust stable; `.cargo/config.toml` forces `sccache`, so cargo fails immediately when it is missing |
 | Terminal environment | Terminal scenarios use a real `bash` PTY and need a Unix-like environment |
 | App dependencies | Before building app artifacts, every app project in the apps repo needs `pnpm install` |
+| mDNS environment | `mdns_health_flow` requires **no second WasmNest desktop instance running on the same machine** (identical instance name `WasmNest-<hostname>` → mDNS conflict and discovery-cache overwrite, which makes the scenario racily flaky on a shared dev host). See that test's header comment for the root cause and the isolation recipe |
 
 Non-standard layouts can use environment overrides:
 
