@@ -21,7 +21,7 @@ path = "src/bin/perf-harness.rs"
 [dependencies]
 # 平台宿主（生产同形装配面）。能力 crate 经 sibling 路径进图，保证与平台仓
 # 构建同源、依赖图中只有一份（类型同一性）。
-wasmnest-desktop-lib = { package = "wasmnest-desktop", path = "../../wasmnest/wasmnest-desktop/src-tauri" }
+wasmnest-desktop-lib = { package = "wasmnest-desktop-runtime", path = "../../wasmnest/wasmnest-desktop/src-tauri" }
 # 无头运行时装配面（真实 app 的 instantiate/activate 细粒度测点用）
 wasmnest-wasm-core = { path = "../../wasmnest-lib/wasmnest-wasm-core", default-features = false, features = ["test-support"] }
 # ABI 形态常量（patch 指回工作树 SDK，见文末 [patch.crates-io]）

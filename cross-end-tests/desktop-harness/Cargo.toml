@@ -18,7 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 # 依赖键 = lib name（与本仓 cross-end-tests 包同口径；L0 改名的直接收益）
-wasmnest-desktop-lib = { package = "wasmnest-desktop", path = "../../../wasmnest/wasmnest-desktop/src-tauri" }
+wasmnest-desktop-lib = { package = "wasmnest-desktop-runtime", path = "../../../wasmnest/wasmnest-desktop/src-tauri" }
 # WS 端点表 + 连接认证态观测（只读：给「移动端首帧认证已被桌面端接受」无竞态判据）
 wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../../wasmnest-lib/wasmnest-server-websocket" }
 # headless 链路加密装配 + 加密计数器快照（http_proxy 场景用；本阶段先留口）

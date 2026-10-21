@@ -7735,7 +7735,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasmnest-desktop"
+name = "wasmnest-desktop-runtime"
 version = "0.0.1"
 dependencies = [
  "actix",
@@ -7906,7 +7906,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "wasmnest-desktop",
+ "wasmnest-desktop-runtime",
  "wasmnest-plugin-api",
  "wasmnest-wasm-core",
 ]

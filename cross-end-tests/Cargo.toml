@@ -34,7 +34,7 @@ path = "src/lib.rs"
 # 两端宿主住平台仓（兄弟目录 `<WASMNEST>/wasmnest/`）；能力仓经 sibling
 # `<WASMNEST>/wasmnest-lib/<crate>` 读取——与平台仓自身构建同源，保证依赖图中能力 crate
 # 只有一份（类型同一性）。
-wasmnest-desktop-lib = { package = "wasmnest-desktop", path = "../../wasmnest/wasmnest-desktop/src-tauri", optional = true }
+wasmnest-desktop-lib = { package = "wasmnest-desktop-runtime", path = "../../wasmnest/wasmnest-desktop/src-tauri", optional = true }
 wasmnest-mobile-lib = { package = "wasmnest-mobile", path = "../../wasmnest/wasmnest-mobile/src-tauri" }
 # server-lib-split 票 07：桌面端 server 基础层（**端口 traits 的定义处**）。仅用于
 # 装配自检直读 `ports::get()` —— 端口注册表是进程级单例，rig 是否装了端口面正是

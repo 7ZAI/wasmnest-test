@@ -84,3 +84,33 @@ SCCACHE_CACHE_SIZE = { value = "32212254720", force = false }
 # 若本机装有独立 LLVM 并已把 <LLVM>\bin 加入 PATH，可把 linker 改为 "lld-link" 使用最新版。
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
+
+# ==================== 能力仓 git 依赖指回兄弟目录（类型同一性） ====================
+# 平台仓 2026-10-21（L2 runtime crate）把桌面宿主的 12 条 wasmnest-lib 依赖从
+# path 改为 **git tag**（`lib-v0.0.2`，为了让宿主 crate 可 `cargo package` /
+# 外部工程消费——path 依赖会让 crate 不可发布）。
+#
+# 本测试容器仓必须**同款指回**兄弟目录 `../wasmnest-lib/*`：本仓自己经 path 依赖
+# 消费能力 crate（`wasmnest-server-base` / `wasmnest-server-websocket` /
+# `wasmnest-server-core` / `wasmnest-discovery-engine` / `wasmnest-wasm-core` /
+# `wasmnest-host-kit`），若不 patch，依赖图里会同时存在「git tag 那份」与
+# 「path 那份」两个副本 —— 类型同一性断裂（例：`ports::get()` 在测试侧与在
+# 桌面宿主侧指向两个不同的单例 ⇒ 端口面判空 ⇒ 七个场景同时 404，
+# 症状看起来像协议 bug）。
+#
+# 与平台仓根 `.cargo/config.toml` 的同名 patch 同款（patch 不进发布包）。
+# 版本须与 tag 内各 crate 的 manifest 对齐（不匹配时 cargo fail-visible）。
+[patch."https://github.com/7ZAI/wasmnest-lib"]
+wasmnest-peer-net = { path = "../wasmnest-lib/peer-net" }
+wasmnest-link-crypto = { path = "../wasmnest-lib/link-crypto" }
+wasmnest-server-base = { path = "../wasmnest-lib/wasmnest-server-base" }
+wasmnest-host-kit = { path = "../wasmnest-lib/wasmnest-host-kit" }
+wasmnest-wasm-core = { path = "../wasmnest-lib/wasmnest-wasm-core" }
+wasmnest-pty-engine = { path = "../wasmnest-lib/wasmnest-pty-engine" }
+wasmnest-discovery-engine = { path = "../wasmnest-lib/wasmnest-discovery-engine" }
+wasmnest-crypto-engine = { path = "../wasmnest-lib/wasmnest-crypto-engine" }
+wasmnest-server-core = { path = "../wasmnest-lib/wasmnest-server-core" }
+wasmnest-server-http = { path = "../wasmnest-lib/wasmnest-server-http" }
+wasmnest-server-websocket = { path = "../wasmnest-lib/wasmnest-server-websocket" }
+wasmnest-server-peer-net = { path = "../wasmnest-lib/wasmnest-server-peer-net" }
+
