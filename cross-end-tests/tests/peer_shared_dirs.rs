@@ -526,16 +526,19 @@ async fn untrusted_dial_is_gated_before_any_share_session() {
 
 // ==================== AC#3：只读约束 ====================
 
-/// 浏览方先取共享根清单获得 dir_id（issue 11 前置）：含用户注册条目与内置
-/// 免授权条目；随后以清单中的 id 正常下钻，证明寻址闭环
+/// 浏览方先取共享根清单获得 dir_id（issue 11 前置）：平台默认目录与用户注册
+/// 条目都以普通条目出现（2026-10-22 起引擎无「内置免授权」特殊语义）；随后
+/// 以清单中的 id 正常下钻，证明寻址闭环
 #[tokio::test]
 async fn roots_listing_reports_registered_dirs_for_browse_addressing() {
     let shared_root = tempfile::tempdir().expect("shared root tempdir");
     let (_, marker) = make_source_file(shared_root.path(), "root.txt", 2 * KIB);
 
-    let store = Arc::new(
-        SharedDirStore::in_memory().with_builtin_download_dir("downloads", shared_root.path().join("dl")),
-    );
+    let store = Arc::new(SharedDirStore::in_memory());
+    let dl_root = tempfile::tempdir().expect("dl root tempdir");
+    let downloads = store
+        .add("downloads", SharedDirRoot::Fs { path: dl_root.path().to_path_buf() })
+        .expect("register platform default dir");
     let entry = store
         .add(
             "shared",
@@ -547,11 +550,11 @@ async fn roots_listing_reports_registered_dirs_for_browse_addressing() {
 
     let (a, b, _rx) = spawn_pair(store, None, TransferConfig::default()).await;
 
-    // ---- 列根：内置免授权条目在前、注册条目随后，id/name 齐备 ----
+    // ---- 列根：平台默认目录与用户条目同列，id/name 齐备 ----
     let conn = dial_trusted(&a, &b).await;
     let roots = list_shared_roots(conn).await.expect("list roots");
-    assert_eq!(roots.len(), 2, "builtin entry + user entries");
-    assert_eq!(roots[0].id, wasmnest_server_peer_net::BUILTIN_DOWNLOADS_ID);
+    assert_eq!(roots.len(), 2, "platform default dir + user entry");
+    assert_eq!(roots[0].id, downloads.id);
     assert_eq!(roots[0].name, "downloads");
     assert_eq!(roots[1].id, entry.id);
     assert_eq!(roots[1].name, "shared");
