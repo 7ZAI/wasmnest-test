@@ -7,10 +7,12 @@
 //!
 //! ## 为什么这个场景必须走 supervisor 启动（而不是 `start_server`）
 //!
-//! 服务器生命周期的**主人**是 `wasmnest_server_core::supervisor::ServerSupervisor`：
-//! 它把端口写进自己的状态（`/api/health` 的 `port` 取自这里）、启动 mDNS 广播
-//! （`supervisor.rs:231`）、重置指标。GUI bootstrap 走的正是
-//! `init_config` → `ws_manager.init()` → `supervisor.start(port)`。
+//! 服务器生命周期的**实现**是 `wasmnest_server_core::supervisor::ServerSupervisor`：
+//! 它把端口写进自己的状态（`/api/health` 的 `port` 取自这里）、登记 mDNS 广播
+//! （`start_mdns_advertisement`）、重置指标。生产 GUI 不再在 boot 自启服务器——
+//! 应用注册端点时经服务租约 acquire `net.transport`，由 `TransportService`
+//! 调用同一对 `supervisor.start/stop`；本 rig 直接调用这条底层动作，等价于
+//! 「某个应用持有了传输面」，广播时序与生产一致。
 //! 而 rig 常用的 `composition::start_http_server` → `app::serve` **绕过 supervisor**：
 //! 既不广播（票面观察到的现象），`/api/health` 还会报默认端口 8765 而不是真实端口。
 //! 本文件因此走 supervisor 同款启动，断言的是生产真实发生的那三件事。
@@ -54,7 +56,7 @@
 //!
 //! | 契约 | 来源（代码证据） | 行为 | 场景 |
 //! |---|---|---|---|
-//! | M-001 | 桌面 `supervisor::start_mdns_advertisement` → `MdnsAdvertiser::start`；移动端 `MdnsDiscovery::start_headless` / `get_services` | 桌面广播 → 移动端真实浏览 `_wasmnest._tcp.local.` → 解析出该服务：`port` 与真实服务器端口逐字一致、`platform == "desktop"`、`device_name` = 实例名、`version` TXT 逐字、`address` 非空且可达、`host_name` 以 `.local.` 结尾 | 正例 |
+//! | M-001 | 桌面 `supervisor::start_mdns_advertisement`（经 `net.transport` 服务启动）→ `MdnsAdvertiser::start`；移动端 `MdnsDiscovery::start_headless` / `get_services` | 桌面广播 → 移动端真实浏览 `_wasmnest._tcp.local.` → 解析出该服务：`port` 与真实服务器端口逐字一致、`platform == "desktop"`、`device_name` = 实例名、`version` TXT 逐字、`address` 非空且可达、`host_name` 以 `.local.` 结尾 | 正例 |
 //! | M-002 | 移动端 `httpProbe`（`useHttpApi.ts:620`）照抄其请求构造：`egress_declare_desktop_target` → `kind="desktop"` 的 `GET /api/health` | 探测真实往返 → 断言 `{status:"ok", port:<真实端口>, uptime_secs:≥0}`（与前端解析的三个字段逐字对齐） | 正例 |
 //! | M-003 | 移动端 `MdnsDiscovery::stop` | 停止后移动端发现列表清空（发现链路不留陈旧条目，用户不会连到已下线的机器） | 正例 |
 
@@ -62,8 +64,8 @@ mod common;
 
 use std::time::Duration;
 
-use wasmnest_mobile_lib::mdns::discovery::MdnsDiscovery;
 use futures_util::FutureExt;
+use wasmnest_mobile_lib::mdns::discovery::MdnsDiscovery;
 
 use common::desktop_ctx;
 use common::mobile_ctx;

@@ -23,6 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde_json::{json, Value};
 use wasmnest_desktop_lib::db::Database;
 use wasmnest_desktop_lib::server::composition::{install_server_ports, start_http_server};
 use wasmnest_desktop_lib::system::app_context::{AppContext, AppContextBuilder};
@@ -32,7 +33,6 @@ use wasmnest_desktop_lib::AppConfig;
 use wasmnest_discovery_engine::advertiser::MdnsAdvertiser;
 use wasmnest_server_websocket::endpoint;
 use wasmnest_server_websocket::registry::{ClientSummary, WsSessionRegistry};
-use serde_json::{json, Value};
 
 /// 认证中心 / 会话真源插件 id（`com.wasmnest.terminal-session`：配对、JWT 签发、
 /// 会话登记域、WS 端点编排全在它自己进程内）
@@ -96,7 +96,8 @@ pub fn guard_side() {
 /// 产物缺失时**显性失败**而非跳过：跨端互连的唯一驱动方式就是真实产物
 /// （与 desktop_ctx.rs / pty_session_chain 同口径）。
 pub fn bundled_plugins_dir() -> PathBuf {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../wasmnest/wasmnest-desktop/src-tauri/resources/plugins/desktop");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../wasmnest/wasmnest-desktop/src-tauri/resources/plugins/desktop");
     let artifact = dir.join(format!("{SESSION_PLUGIN_ID}/bedcode_plugin_terminal_session.wasm"));
     assert!(
         artifact.exists(),
@@ -167,6 +168,7 @@ pub async fn init_app_context(activate_center: bool) {
             wasmnest_desktop_lib::wasm_core::manager::runtime::AbiPolicy::UNCONSTRAINED,
             std::sync::Arc::new(wasmnest_desktop_lib::wasm_core::host_api::ports::UnimplementedHostFacts),
             None,
+            None,
         )
         .await;
         plugin_host.init_message_bus().await;
@@ -230,10 +232,7 @@ pub async fn start_server(
 }
 
 /// 优雅停机并等待服务器任务退出（超时 panic：静默超时会让端口被占用影响后续 target）
-pub async fn stop_server(
-    handle: actix_web::dev::ServerHandle,
-    task: tokio::task::JoinHandle<std::io::Result<()>>,
-) {
+pub async fn stop_server(handle: actix_web::dev::ServerHandle, task: tokio::task::JoinHandle<std::io::Result<()>>) {
     tokio::time::timeout(std::time::Duration::from_secs(10), handle.stop(true))
         .await
         .expect("graceful stop must complete within timeout");
@@ -291,11 +290,7 @@ pub async fn try_plugin_api_call(api: &str, params: Value) -> Result<Value, Stri
 ///
 /// 走 `PluginHost::invoke_rust_command`（`api_bridge::plugin_invoke` 的下游，
 /// 去掉的是 webview + 凭证层——那是身份管道，不是输出管道）。可失败版。
-pub async fn try_plugin_command(
-    plugin_id: &str,
-    command: &str,
-    args: Value,
-) -> Result<Value, String> {
+pub async fn try_plugin_command(plugin_id: &str, command: &str, args: Value) -> Result<Value, String> {
     AppContext::global()
         .plugin_host()
         .invoke_rust_command(plugin_id, command, args)
@@ -381,12 +376,7 @@ pub async fn plugin_ws_endpoint_clients(plugin_id: &str, path: &str) -> Vec<Valu
 ///
 /// 用于「意外掉线」场景的服务端侧动作（等价于网络中断时骨架收尾的那一步），
 /// 不伪造任何数据：断开之后帧真的不再流动，由断言去验。
-pub async fn disconnect_plugin_ws_endpoint_clients(
-    plugin_id: &str,
-    path: &str,
-    code: u16,
-    reason: &str,
-) -> usize {
+pub async fn disconnect_plugin_ws_endpoint_clients(plugin_id: &str, path: &str, code: u16, reason: &str) -> usize {
     let endpoint_id = plugin_ws_endpoint_id(plugin_id, path);
     WsSessionRegistry::global()
         .disconnect_by_endpoint(&endpoint_id, code, reason)
@@ -455,7 +445,10 @@ pub async fn rpc_dispatch(method: &str, params: Value) -> Result<Value, String> 
             Ok(Value::Null)
         }
         "set-link-crypto-enabled" => {
-            let enabled = params.get("enabled").and_then(Value::as_bool).ok_or_else(|| "missing enabled".to_string())?;
+            let enabled = params
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| "missing enabled".to_string())?;
             set_link_crypto_enabled(enabled);
             Ok(Value::Null)
         }
@@ -492,7 +485,9 @@ mod tests {
     async fn dispatch_unknown_and_bad_params_are_errors() {
         assert!(rpc_dispatch("no-such-method", json!({})).await.is_err());
         assert!(rpc_dispatch("seed-shell-config", json!({})).await.is_err());
-        assert!(rpc_dispatch("ws-endpoint-clients", json!({ "path": "terminal" })).await.is_err());
+        assert!(rpc_dispatch("ws-endpoint-clients", json!({ "path": "terminal" }))
+            .await
+            .is_err());
     }
 
     /// 摘要序列化：字段逐字对应（rpc 通道的 wire 形状 = 测试断言读的键）

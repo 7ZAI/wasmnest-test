@@ -45,18 +45,21 @@ pub async fn assemble(
         },
         Arc::new(wasmnest_desktop_lib::plugin::host_facts::DesktopHostFacts),
         None,
+        None,
     )
     .await;
 
     // 生产由 `lib.rs` 在宿主建成后调用；`PluginHost::new` 自身不调
     host.init_message_bus().await;
     // 与 GUI bootstrap 同款：晚绑定共享槽，扫描期已实例化的插件同样生效
-    host.wasm_runtime()
-        .set_guest_events(Arc::new(wasmnest_desktop_lib::plugin::guest_events::DesktopGuestEvents));
+    host.wasm_runtime().set_guest_events(Arc::new(
+        wasmnest_desktop_lib::plugin::guest_events::DesktopGuestEvents,
+    ));
 
     let plugin_db_root = temp_root.join("plugin-dbs");
     std::fs::create_dir_all(&plugin_db_root)?;
-    host.wasm_host_ctx().set_plugin_db_root(Some(plugin_db_root));
+    host.wasm_host_ctx()
+        .set_plugin_db_root(Some(plugin_db_root));
 
     Ok(AssembledHost { host, db })
 }

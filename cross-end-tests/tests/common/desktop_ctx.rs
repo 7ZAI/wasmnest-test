@@ -154,7 +154,8 @@ pub async fn disconnect_plugin_ws_endpoint_clients(plugin_id: &str, path: &str, 
 /// 产物缺失时**显性失败**而非跳过：跨端互连的唯一驱动方式就是真实产物，
 /// 静默 skip 会把「未验证」伪装成「通过」（与 `pty_session_chain` 同口径）。
 pub fn bundled_plugins_dir() -> PathBuf {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wasmnest/wasmnest-desktop/src-tauri/resources/plugins/desktop");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../wasmnest/wasmnest-desktop/src-tauri/resources/plugins/desktop");
     let artifact = dir.join(format!("{SESSION_PLUGIN_ID}/bedcode_plugin_terminal_session.wasm"));
     assert!(
         artifact.exists(),
@@ -296,6 +297,7 @@ async fn init_app_context_inner(activate_center: bool) {
             wasmnest_desktop_lib::wasm_core::manager::runtime::AbiPolicy::UNCONSTRAINED,
             std::sync::Arc::new(wasmnest_desktop_lib::wasm_core::host_api::ports::UnimplementedHostFacts),
             None,
+            None,
         )
         .await;
         plugin_host.init_message_bus().await;
@@ -356,22 +358,24 @@ pub fn advertised_app_version() -> String {
 
 // ==================== 生产同款服务器启动（经 ServerSupervisor，票 03） ====================
 
-/// 启动服务器（**生产同款**：GUI bootstrap `lib.rs` 第 2-4 步）
+/// 启动服务器（**生产同款**：传输面服务 start 的底层动作）
 ///
-/// 与 [`start_server`] 的区别不是「快慢」而是**语义**：supervisor 才是服务器生命周期的
-/// 主人，它额外做三件与本场景直接相关的事——
+/// 与 [`start_server`] 的区别不是「快慢」而是**语义**：supervisor 是传输面生命周期的
+/// 实现（生产由 `net.transport` 服务租约在首个应用引用时调用同一对 start/stop），
+/// 它额外做三件与本场景直接相关的事——
 /// ① 把端口写进自己的状态（`/api/health` 的 `port` 字段取自这里，不走 supervisor 就是
 /// 默认端口，用户与诊断看到的端口会撒谎）；
-/// ② 启动 mDNS 广播（用户「发现并连上桌面」的入口）；
+/// ② 登记 mDNS 广播（用户「发现并连上桌面」的入口）；
 /// ③ 重置指标计数器。
 ///
-/// 因此 mDNS / health 场景必须走这条路径；其余场景走 [`start_server`]（更轻）。
+/// 因此 mDNS / health 场景必须走这条路径（等价于「有应用持有传输面」）；
+/// 其余场景走 [`start_server`]（更轻）。
 pub async fn start_server_via_supervisor(port: u16) {
     use wasmnest_server_base::ports::get as ports_get;
     use wasmnest_server_core::supervisor::ServerSupervisor;
 
     let supervisor = ServerSupervisor::global();
-    supervisor.init_config(port, true).await;
+    supervisor.init_config(port).await;
     wasmnest_server_websocket::WebSocketManager::global()
         .init()
         .await
@@ -390,7 +394,9 @@ pub async fn start_server_via_supervisor(port: u16) {
 
 /// 停止 supervisor 管理的服务器（幂等）
 pub async fn stop_server_via_supervisor() {
-    let _ = wasmnest_server_core::supervisor::ServerSupervisor::global().stop().await;
+    let _ = wasmnest_server_core::supervisor::ServerSupervisor::global()
+        .stop()
+        .await;
 }
 /// 探测空闲端口：绑 127.0.0.1:0 由 OS 分配，立即释放后交给服务器绑定
 pub fn pick_free_port() -> u16 {
