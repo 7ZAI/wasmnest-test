@@ -42,6 +42,10 @@ wasmnest-mobile-lib = { package = "wasmnest-mobile", path = "../../wasmnest/wasm
 # 端口**装配**本身仍走宿主组合根 `server::composition::install_server_ports()`
 # （与 GUI bootstrap 同一函数），本依赖只让自检能验「装的是不是真端口面」。
 wasmnest-server-base = { package = "wasmnest-server-base", path = "../../wasmnest-lib/wasmnest-server-base" }
+# peer 传输/共享目录集成场景（2026-10-22 peer-net-dissolve：原 `wasmnest-peer-net`
+# 底座拆分并入 `wasmnest-server-peer-net`，其自持集成测试（真实双节点 TLS 端到端）
+# 迁入本仓 `tests/peer_*`，改依赖键指向能力域 crate）
+wasmnest-server-peer-net = { package = "wasmnest-server-peer-net", path = "../../wasmnest-lib/wasmnest-server-peer-net" }
 # 事件通道场景（票 01）：**只读**观测桌面 WS 传输注册表（端点表 + 连接认证态）。
 # 用途：给「移动端首帧认证已被桌面端接受」一条无竞态的可观测判据——移动端的就绪
 # 信号（`ws_event_channel_ready`）在首帧**发出后**即发射，插件侧的零客户端早退看
@@ -58,6 +62,8 @@ wasmnest-server-core = { package = "wasmnest-server-core", path = "../../wasmnes
 wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../wasmnest-lib/wasmnest-discovery-engine" }
 
 [dev-dependencies]
+# tempfile：peer 传输/共享目录集成场景的临时目录（迁移自 wasmnest-peer-net 测试）
+tempfile = "3"
 # tokio：测试运行时与轮询等待（与两端同版本，依赖图统一为一份）
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 serde_json = "1"

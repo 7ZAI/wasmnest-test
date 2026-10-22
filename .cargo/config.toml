@@ -101,7 +101,6 @@ linker = "rust-lld"
 # 与平台仓根 `.cargo/config.toml` 的同名 patch 同款（patch 不进发布包）。
 # 版本须与 tag 内各 crate 的 manifest 对齐（不匹配时 cargo fail-visible）。
 [patch."https://github.com/7ZAI/wasmnest-lib"]
-wasmnest-peer-net = { path = "../wasmnest-lib/peer-net" }
 wasmnest-link-crypto = { path = "../wasmnest-lib/link-crypto" }
 wasmnest-server-base = { path = "../wasmnest-lib/wasmnest-server-base" }
 wasmnest-host-kit = { path = "../wasmnest-lib/wasmnest-host-kit" }

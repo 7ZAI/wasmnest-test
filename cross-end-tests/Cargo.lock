@@ -1346,6 +1346,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde_json",
  "tauri",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -1356,6 +1357,7 @@ dependencies = [
  "wasmnest-mobile",
  "wasmnest-server-base",
  "wasmnest-server-core",
+ "wasmnest-server-peer-net",
  "wasmnest-server-websocket",
  "wasmnest-wasm-core",
 ]
@@ -8094,7 +8096,6 @@ dependencies = [
  "wasmnest-discovery-engine",
  "wasmnest-host-kit",
  "wasmnest-link-crypto",
- "wasmnest-peer-net",
  "wasmnest-plugin-api",
  "wasmnest-pty-engine",
  "wasmnest-server-base",
@@ -8117,6 +8118,7 @@ version = "0.0.1"
 dependencies = [
  "flume",
  "inventory",
+ "local-ip-address",
  "mdns-sd",
  "serde",
  "serde_json",
@@ -8124,7 +8126,6 @@ dependencies = [
  "tracing",
  "uuid",
  "wasmnest-host-kit",
- "wasmnest-peer-net",
  "wasmtime",
  "wit-bindgen 0.60.0",
 ]
@@ -8210,7 +8211,6 @@ dependencies = [
  "wasmnest-host-api-core",
  "wasmnest-host-kit",
  "wasmnest-link-crypto",
- "wasmnest-peer-net",
  "wasmnest-plugin-api-mobile",
  "wasmnest-server-base",
  "wasmnest-server-http",
@@ -8219,34 +8219,6 @@ dependencies = [
  "wasmnest-ws-client-engine",
  "wasmtime",
  "zip",
-]
-
-[[package]]
-name = "wasmnest-peer-net"
-version = "0.0.1"
-dependencies = [
- "aes-gcm",
- "chrono",
- "ed25519-dalek",
- "flume",
- "hex",
- "hkdf",
- "local-ip-address",
- "mdns-sd",
- "rand_core 0.6.4",
- "rcgen",
- "ring",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "socket2",
- "thiserror 1.0.69",
- "tokio",
- "tokio-rustls",
- "tracing",
- "x25519-dalek",
- "x509-parser",
 ]
 
 [[package]]
@@ -8319,6 +8291,7 @@ dependencies = [
  "actix-cors",
  "actix-service",
  "actix-web",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "hex",
@@ -8360,18 +8333,36 @@ dependencies = [
 name = "wasmnest-server-peer-net"
 version = "0.0.1"
 dependencies = [
+ "aes-gcm",
  "anyhow",
+ "async-trait",
+ "chrono",
+ "ed25519-dalek",
+ "flume",
+ "hex",
+ "hkdf",
  "inventory",
+ "local-ip-address",
+ "mdns-sd",
+ "rand_core 0.6.4",
+ "rcgen",
+ "ring",
+ "rustls",
  "serde",
  "serde_json",
+ "sha2",
+ "socket2",
+ "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "uuid",
  "wasmnest-host-kit",
- "wasmnest-peer-net",
  "wasmnest-server-base",
  "wasmtime",
  "wit-bindgen 0.60.0",
+ "x25519-dalek",
+ "x509-parser",
 ]
 
 [[package]]
@@ -8433,7 +8424,6 @@ dependencies = [
  "wasmnest-host-api-core",
  "wasmnest-host-kit",
  "wasmnest-link-crypto",
- "wasmnest-peer-net",
  "wasmnest-plugin-api",
  "wasmnest-server-base",
  "wasmnest-server-http",
