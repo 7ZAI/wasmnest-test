@@ -216,19 +216,8 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      # 随包产物链需要 pnpm（版本 = 平台仓 packageManager 钉版）
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: wasmnest/package.json
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: |
-            wasmnest/wasmnest-desktop/pnpm-lock.yaml
-            wasmnest/wasmnest-mobile/pnpm-lock.yaml
-
+      # 检出必须先于 pnpm/node 装配：packageManager 钉版与 pnpm 缓存键都读平台仓
+      # package.json / pnpm-lock.yaml（本仓无 package.json，平台仓由下面的克隆提供）
       - name: 检出三仓（兄弟目录，跟 ref 不钉 tag；失败 fail-visible）
         run: |
           set -euo pipefail
@@ -254,6 +243,19 @@ jobs:
           echo "platform=$WASMNEST_PLATFORM_REF@$(git -C ../wasmnest rev-parse --short HEAD) \
                 lib=$WASMNEST_LIB_REF@$(git -C ../wasmnest-lib rev-parse --short HEAD) \
                 apps=$WASMNEST_APPS_REF@$(git -C ../wasmnest-apps rev-parse --short HEAD)"
+
+      # 随包产物链需要 pnpm（版本 = 平台仓 packageManager 钉版）
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: wasmnest/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            wasmnest/wasmnest-desktop/pnpm-lock.yaml
+            wasmnest/wasmnest-mobile/pnpm-lock.yaml
 
       - name: 拼装双端 WIT 生成物
         run: node ../wasmnest/scripts/compose-wit.mjs --all
