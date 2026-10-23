@@ -326,8 +326,14 @@ jobs:
       - name: wasm unknown-unknown target（mobile 应用 wasm）
         run: rustup target add wasm32-unknown-unknown
 
-      # 重建双端随包插件产物（*_flow 场景的驱动面；缺失时测试按设计 fail-visible 直接红）
+      # 重建双端随包插件产物（*_flow 场景的驱动面；缺失时测试按设计 fail-visible 直接红）。
+      # WASMNEST_COMPONENTIZE_MANIFEST：移动插件构建的组件化工具 = 桌面 SDK 的
+      # tools/componentize——pnpm file: 依赖落在 node_modules/.pnpm 虚拟链下，
+      # CLI 自 SDK 根向上发现（平台仓根/wasmnest-desktop/...）在虚拟链里走不到，
+      # 显式指给 runner 内落点（CLI 对显式路径不存在会直接红，不静默回退）。
       - name: 重建随包插件产物（plugins:build 双端）
+        env:
+          WASMNEST_COMPONENTIZE_MANIFEST: ${{ github.workspace }}/wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/tools/componentize/Cargo.toml
         run: |
           set -euo pipefail
           pnpm --dir ../wasmnest/wasmnest-desktop run plugins:build
