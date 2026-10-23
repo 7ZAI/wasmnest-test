@@ -1,0 +1,318 @@
+# ==============================================================================
+# 跨端测试仓 CI（7ZAI/wasmnest-test#4 / 平台仓 spec §4.2 跨端仓行）：cross-end-tests 门禁
+#
+# 仓形态（AGENTS.md）：容器仓，工程本体 = cross-end-tests/（独立 Cargo workspace：
+# 主包 + desktop-harness）。`cargo test` **同进程 path 依赖**平台仓双端 src-tauri
+# （../../wasmnest/wasmnest-{desktop,mobile}/src-tauri）与能力仓 crate
+# （../../wasmnest-lib/*），另有两层 patch 把平台宿主的 git-tag lib 依赖与本仓
+# crates-io SDK 依赖指回同一物理路径（根 .cargo/config.toml / 主包 Cargo.toml）——
+# 类型同一性依赖 R1 同场布局，CI 必须把三仓按兄弟目录检出。
+#
+# 跨仓检出口径（**跟 ref 不钉 tag**，与平台仓 test.yml / 应用仓 ci.yml 一致）：
+#  - 平台仓 `vars.WASMNEST_PLATFORM_REF`、能力仓 `vars.WASMNEST_LIB_REF`、
+#    应用仓 `vars.WASMNEST_APPS_REF`（未设均默认 `dev`；workflow_dispatch 可逐仓覆盖）；
+#  - CI 只做校验——按 release-manifest.json 钉精确 tag 是发布流水线的事，开发期
+#    钉 tag 会让未发 tag 的跨仓改动长期误红；
+#  - 检出失败 fail-visible：git clone 对不存在的 ref 直接非零退出，另加关键路径
+#    存在性点名（ref 选错 / 仓结构变了不允许静默继续）；
+#  - 四仓均公开，匿名克隆即可；转私有时参照应用仓 fetch-cross-repo.mjs 的
+#    CROSS_REPO_TOKEN extraheader 方案补鉴权。
+#
+# 分层口径（issue 允许按目录过滤起步）：
+#  - PR/push 门禁 = locks-peer：**不依赖随包插件产物**的稳定子集——
+#      ① 六个源码文本锁（wire/权限/命令词汇/mDNS 单例/应用身份/单产物接线）：
+#        纯文件扫描，只读三仓源码（resolver：tests/common/repo_paths.rs / app_paths.rs）；
+#      ② 五个 peer 集成测试（进程内双节点、回环互指、真实 mTLS 直连，无 mDNS 组播、
+#        无插件产物）。二者共享同一依赖图编译（无法靠子集省编译），增量成本只有运行时。
+#  - nightly 全量 = full：随包插件产物 e2e（九个 *_flow 场景 + harness_selfcheck，
+#    产物缺失按设计 fail-visible）+ two-proc 两进程模式。产物链最重：
+#    检三仓 → 拼 WIT → 双端 SDK dist → 装应用工程 → wasip3 工具链 → plugins:build
+#    → cargo test（default）→ two-proc 模式，首跑可能逼近 timeout，sccache 命中后收敛。
+#
+# 与 husky pre-commit 的关系：本仓无 pre-commit 钩子，CI 即唯一门禁。
+#
+# 分支说明：默认 / 集成分支 = dev（仓唯一常驻远端分支，gh repo view 核实）。
+# ==============================================================================
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [dev] # 集成分支 = 默认分支 dev
+  schedule:
+    # nightly 04:10 北京时间（UTC 20:10）：跑 full 全量面（与平台仓 nightly 错峰）
+    - cron: '10 20 * * *'
+  workflow_dispatch:
+    inputs:
+      platform_ref:
+        description: 'wasmnest（平台仓）检出 ref，默认 dev'
+        type: string
+        default: 'dev'
+      lib_ref:
+        description: 'wasmnest-lib（能力仓）检出 ref，默认 dev'
+        type: string
+        default: 'dev'
+      apps_ref:
+        description: 'wasmnest-apps（应用仓）检出 ref，默认 dev'
+        type: string
+        default: 'dev'
+      full:
+        description: '本次手跑是否执行 full（全量 cargo test + 随包产物 e2e + two-proc）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 跨仓 ref：input（手跑）> 仓库变量 > dev。PR / push / schedule 上 inputs.* 为空。
+  WASMNEST_PLATFORM_REF: ${{ inputs.platform_ref || vars.WASMNEST_PLATFORM_REF || 'dev' }}
+  WASMNEST_LIB_REF: ${{ inputs.lib_ref || vars.WASMNEST_LIB_REF || 'dev' }}
+  WASMNEST_APPS_REF: ${{ inputs.apps_ref || vars.WASMNEST_APPS_REF || 'dev' }}
+  # sccache：仓根 .cargo/config.toml 强制 rustc-wrapper=sccache（未安装则 cargo
+  # 直接失败——显性失败设计，CI 必须装）；CI 磁盘有限压 2GiB、jobs=4 与平台仓
+  # test.yml / host-release.yml 口径一致
+  SCCACHE_CACHE_SIZE: '2147483648'
+  CARGO_BUILD_JOBS: '4'
+
+defaults:
+  run:
+    # 本仓检出到 <workspace>/wasmnest-test，三仓兄弟目录由各 job 自行克隆
+    # （R1 同场布局；.cargo/config.toml 的 [patch] 相对路径 ../wasmnest-lib 依赖它）
+    working-directory: wasmnest-test
+
+jobs:
+  # ============================ PR 门禁：稳定子集（锁 + peer） ============================
+  locks-peer:
+    name: locks-peer
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: 检出跨端测试仓
+        uses: actions/checkout@v4
+        with:
+          path: wasmnest-test
+          fetch-depth: 1
+
+      # 双端 src-tauri 经 path 依赖进图（tauri 2 → WebKitGTK 系栈），编译前置系统库
+      - name: 安装 tauri Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libsoup-3.0-dev libssl-dev pkg-config libgtk-3-dev build-essential libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # 仓根 .cargo/config.toml 强制 rustc-wrapper=sccache：没装则一切 cargo 命令直接失败
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      # compose-wit.mjs 只依赖 node 内建模块，无需 pnpm install
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 检出三仓（兄弟目录，跟 ref 不钉 tag；失败 fail-visible）
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$WASMNEST_PLATFORM_REF" \
+            https://github.com/7ZAI/wasmnest.git ../wasmnest
+          git clone --depth 1 --branch "$WASMNEST_LIB_REF" \
+            https://github.com/7ZAI/wasmnest-lib.git ../wasmnest-lib
+          git clone --depth 1 --branch "$WASMNEST_APPS_REF" \
+            https://github.com/7ZAI/wasmnest-apps.git ../wasmnest-apps
+          # 点名各仓被本工程消费的关键路径：ref 选错 / 仓结构变了不允许静默继续
+          for p in \
+            ../wasmnest/wasmnest-desktop/src-tauri/Cargo.toml \
+            ../wasmnest/wasmnest-mobile/src-tauri/Cargo.toml \
+            ../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/rust/Cargo.toml \
+            ../wasmnest/scripts/compose-wit.mjs \
+            ../wasmnest-lib/wasmnest-contract \
+            ../wasmnest-lib/wasmnest-wasm-core \
+            ../wasmnest-lib/wasmnest-server-base \
+            ../wasmnest-lib/wasmnest-server-core \
+            ../wasmnest-lib/wasmnest-server-http \
+            ../wasmnest-lib/wasmnest-server-websocket \
+            ../wasmnest-lib/wasmnest-server-peer-net \
+            ../wasmnest-lib/wasmnest-discovery-engine \
+            ../wasmnest-lib/wasmnest-host-kit \
+            ../wasmnest-apps/apps/bedcode/mobile ; do
+            if [ ! -e "$p" ]; then
+              echo "::error::跨仓检出内容不完整：缺 $p（ref 选错或仓结构变了？）"
+              exit 1
+            fi
+          done
+          echo "platform=$WASMNEST_PLATFORM_REF@$(git -C ../wasmnest rev-parse --short HEAD) \
+                lib=$WASMNEST_LIB_REF@$(git -C ../wasmnest-lib rev-parse --short HEAD) \
+                apps=$WASMNEST_APPS_REF@$(git -C ../wasmnest-apps rev-parse --short HEAD)"
+
+      # SDK rust/wit/ 拼装（生成物）：default 模式依赖图含 [patch.crates-io] 指回的
+      # 桌面 SDK crate，编译前按 lib@ref 现拼（与平台仓 rust-check 同款前置）
+      - name: 拼装双端 WIT 生成物
+        run: node ../wasmnest/scripts/compose-wit.mjs --all
+
+      # PR 门禁稳定子集 = 不需要随包插件产物的全部测试二进制：
+      #  - 六个源码文本锁（跨仓契约漂移 / 权限与命令词汇 / mDNS 单例 / bedcode
+      #    应用身份 / file-transfer 单产物接线）
+      #  - 五个 peer 场景（真实 mTLS 双节点；lock 的行为面互补）
+      # 依赖随包产物的 *_flow / harness_selfcheck / two-proc 留在 full（nightly）。
+      # 名单增删时同步本注释与仓 AGENTS.md §1。
+      - name: cargo test（锁 + peer 稳定子集）
+        working-directory: wasmnest-test/cross-end-tests
+        run: |
+          cargo test \
+            --test wire_drift_locks \
+            --test permission_vocabulary_lock \
+            --test command_vocabulary_lock \
+            --test mdns_browse_singleton_lock \
+            --test bedcode_app_identity_lock \
+            --test file_transfer_wiring_lock \
+            --test peer_harness \
+            --test peer_discovery_injection \
+            --test peer_shared_dirs \
+            --test peer_transfer_session \
+            --test peer_pause_symmetry
+
+  # ============== nightly 全量：随包产物 e2e + 全量 cargo test + two-proc（不进 PR 阻断） ==============
+  # 触发：schedule（nightly）、workflow_dispatch 勾选 full。
+  full:
+    name: full-nightly
+    if: github.event_name == 'schedule' || inputs.full == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: 检出跨端测试仓
+        uses: actions/checkout@v4
+        with:
+          path: wasmnest-test
+          fetch-depth: 1
+
+      - name: 安装 tauri Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libsoup-3.0-dev libssl-dev pkg-config libgtk-3-dev build-essential libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      # 随包产物链需要 pnpm（版本 = 平台仓 packageManager 钉版）
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: wasmnest/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            wasmnest/wasmnest-desktop/pnpm-lock.yaml
+            wasmnest/wasmnest-mobile/pnpm-lock.yaml
+
+      - name: 检出三仓（兄弟目录，跟 ref 不钉 tag；失败 fail-visible）
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$WASMNEST_PLATFORM_REF" \
+            https://github.com/7ZAI/wasmnest.git ../wasmnest
+          git clone --depth 1 --branch "$WASMNEST_LIB_REF" \
+            https://github.com/7ZAI/wasmnest-lib.git ../wasmnest-lib
+          git clone --depth 1 --branch "$WASMNEST_APPS_REF" \
+            https://github.com/7ZAI/wasmnest-apps.git ../wasmnest-apps
+          for p in \
+            ../wasmnest/wasmnest-desktop/src-tauri/Cargo.toml \
+            ../wasmnest/wasmnest-mobile/src-tauri/Cargo.toml \
+            ../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/rust/Cargo.toml \
+            ../wasmnest/scripts/compose-wit.mjs \
+            ../wasmnest/scripts/wasip3-toolchain.sh \
+            ../wasmnest-lib/wasmnest-wasm-core \
+            ../wasmnest-apps/apps/bedcode/mobile ; do
+            if [ ! -e "$p" ]; then
+              echo "::error::跨仓检出内容不完整：缺 $p（ref 选错或仓结构变了？）"
+              exit 1
+            fi
+          done
+          echo "platform=$WASMNEST_PLATFORM_REF@$(git -C ../wasmnest rev-parse --short HEAD) \
+                lib=$WASMNEST_LIB_REF@$(git -C ../wasmnest-lib rev-parse --short HEAD) \
+                apps=$WASMNEST_APPS_REF@$(git -C ../wasmnest-apps rev-parse --short HEAD)"
+
+      - name: 拼装双端 WIT 生成物
+        run: node ../wasmnest/scripts/compose-wit.mjs --all
+
+      # SDK dist 不入库但被应用工程 / 插件 CLI 消费（口径同平台仓 test.yml rust-full）
+      - name: 构建桌面 SDK dist（随包产物前置）
+        run: |
+          set -euo pipefail
+          pnpm --dir ../wasmnest/wasmnest-desktop install --frozen-lockfile
+          pnpm --dir ../wasmnest/wasmnest-desktop --filter '@binblink/wasmnest-plugin-sdk-desktop' run build
+
+      - name: 构建移动 SDK dist（插件 CLI 前置）
+        run: |
+          set -euo pipefail
+          pnpm --dir ../wasmnest/wasmnest-mobile/packages/plugin-sdk-mobile install --frozen-lockfile
+          pnpm --dir ../wasmnest/wasmnest-mobile/packages/plugin-sdk-mobile run build
+
+      # 每个应用工程是独立 workspace，逐一安装（口径同平台仓 test.yml / 应用仓 ci.yml）
+      - name: 安装应用工程依赖（desktop + mobile）
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for pkg in ../wasmnest-apps/apps/*/desktop/package.json \
+                     ../wasmnest-apps/servers/*/desktop/package.json \
+                     ../wasmnest-apps/apps/*/mobile/package.json \
+                     ../wasmnest-apps/servers/*/mobile/package.json; do
+            dir="$(dirname "$pkg")"
+            echo "::group::pnpm install $dir"
+            (cd "$dir" && pnpm install --frozen-lockfile)
+            echo "::endgroup::"
+          done
+
+      # 桌面应用 wasm 走 pinned wasip3 nightly（单一事实源 = 平台仓
+      # scripts/wasip3-toolchain.sh；CI 直连官方 rustup 源）。rustup override 只作用于
+      # 应用仓目录：应用 wasm 构建用 nightly，cross-end-tests 的 cargo 仍是 stable。
+      - name: wasip3 工具链（desktop 应用 wasm）
+        run: |
+          set -euo pipefail
+          export RUSTUP_DIST_SERVER=https://static.rust-lang.org
+          export RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup
+          bash ../wasmnest/scripts/wasip3-toolchain.sh install
+          nightly="$(sed -n 's/^WASIP3_NIGHTLY="${WASIP3_NIGHTLY:-\(nightly-[0-9-]*\)}"$/\1/p' \
+            ../wasmnest/scripts/wasip3-toolchain.sh)"
+          if [ -z "$nightly" ]; then
+            echo "::error::无法从 wasip3-toolchain.sh 解析 pinned nightly（脚本头注格式变了？）"
+            exit 1
+          fi
+          rustup target add wasm32-unknown-unknown --toolchain "$nightly"
+          rustup override set "$nightly" --path ../wasmnest-apps
+
+      - name: wasm unknown-unknown target（mobile 应用 wasm）
+        run: rustup target add wasm32-unknown-unknown
+
+      # 重建双端随包插件产物（*_flow 场景的驱动面；缺失时测试按设计 fail-visible 直接红）
+      - name: 重建随包插件产物（plugins:build 双端）
+        run: |
+          set -euo pipefail
+          pnpm --dir ../wasmnest/wasmnest-desktop run plugins:build
+          pnpm --dir ../wasmnest/wasmnest-mobile run plugins:build
+
+      # 全量（default = desktop 单进程模式）：锁 + peer + 九个 *_flow + harness_selfcheck
+      - name: cargo test（default 模式全量）
+        working-directory: wasmnest-test/cross-end-tests
+        run: cargo test
+
+      # two-proc 模式：先在 default 模式构建 desktop-harness 二进制（required-features
+      # 门控，two-proc 下不编译），再以纯移动侧依赖图跑两进程场景
+      - name: two-proc 模式（harness 预构建 + 两进程场景）
+        working-directory: wasmnest-test/cross-end-tests
+        run: |
+          set -euo pipefail
+          cargo build -p wasmnest-crossend-desktop-harness
+          cargo test -p cross-end-tests --no-default-features --features two-proc
