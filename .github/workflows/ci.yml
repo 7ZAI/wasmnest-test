@@ -273,8 +273,15 @@ jobs:
           pnpm --dir ../wasmnest/wasmnest-mobile/packages/plugin-sdk-mobile install --frozen-lockfile
           pnpm --dir ../wasmnest/wasmnest-mobile/packages/plugin-sdk-mobile run build
 
-      # 每个应用工程是独立 workspace，逐一安装（口径同平台仓 test.yml / 应用仓 ci.yml）
-      - name: 安装应用工程依赖（desktop + mobile）
+      # 每个应用工程是独立 workspace，逐一安装（口径同平台仓 test.yml / 应用仓 ci.yml）。
+      # ⚠ 跨仓桥接（**临时**，SDK 发布到 npm 后删除本分支）：apps@dev 的 agent-hub /
+      # bedcode desktop manifest 已切 registry 版本号 "0.0.1"（SDK 发布迁移中），但
+      # SDK 未上 npm、各工程 lockfile 仍记录 file: 指回 R1 同场路径——fresh install
+      # 双向都失败（--frozen-lockfile 报 specifier mismatch；放开又 registry 404）。
+      # 桥接 = 把版本号指回同场 file: 路径（与 lockfile 已记录的 specifier 完全一致，
+      # 路径在 CI 布局里真实存在），仅改 runner 检出、不入库；sed 未命中时 install
+      # 按原样失败（fail-visible，不会静默跳过）。
+      - name: 安装应用工程依赖（desktop + mobile；SDK 版本号指回同场 file:）
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -283,6 +290,14 @@ jobs:
                      ../wasmnest-apps/apps/*/mobile/package.json \
                      ../wasmnest-apps/servers/*/mobile/package.json; do
             dir="$(dirname "$pkg")"
+            if grep -q '"@binblink/wasmnest-plugin-sdk-desktop": "0.0.1"' "$pkg"; then
+              sed -i 's#"@binblink/wasmnest-plugin-sdk-desktop": "0.0.1"#"@binblink/wasmnest-plugin-sdk-desktop": "file:../../../../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop"#' "$pkg"
+              echo "[bridge] sdk-desktop 0.0.1 → file: $pkg"
+            fi
+            if grep -q '"@binblink/wasmnest-plugin-sdk-mobile": "0.0.1"' "$pkg"; then
+              sed -i 's#"@binblink/wasmnest-plugin-sdk-mobile": "0.0.1"#"@binblink/wasmnest-plugin-sdk-mobile": "file:../../../../wasmnest/wasmnest-mobile/packages/plugin-sdk-mobile"#' "$pkg"
+              echo "[bridge] sdk-mobile 0.0.1 → file: $pkg"
+            fi
             echo "::group::pnpm install $dir"
             (cd "$dir" && pnpm install --frozen-lockfile)
             echo "::endgroup::"
