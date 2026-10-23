@@ -157,6 +157,17 @@ jobs:
       - name: 拼装双端 WIT 生成物
         run: node ../wasmnest/scripts/compose-wit.mjs --all
 
+      # mobile src-tauri 的 tauri.conf.json resources glob（resources/plugins/**/*）
+      # 在无随包产物的 fresh clone 上匹配不到任何文件（产物 gitignore、只留 .gitkeep，
+      # glob 不吃点文件），tauri-build 直接 panic「path not found or didn't match」。
+      # 本 job 刻意不构建产物（lock/peer 不消费它们），放一个占位文件让 glob 非空；
+      # full job 走 plugins:build 真产物，无需占位。
+      - name: 随包产物 glob 占位（mobile tauri-build 前置）
+        run: |
+          set -euo pipefail
+          mkdir -p ../wasmnest/wasmnest-mobile/src-tauri/resources/plugins/mobile
+          touch ../wasmnest/wasmnest-mobile/src-tauri/resources/plugins/mobile/ci-glob-placeholder.txt
+
       # PR 门禁稳定子集 = 不需要随包插件产物的全部测试二进制：
       #  - 六个源码文本锁（跨仓契约漂移 / 权限与命令词汇 / mDNS 单例 / bedcode
       #    应用身份 / file-transfer 单产物接线）
