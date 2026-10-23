@@ -498,3 +498,12 @@ mod ws_client_engine {
         );
     }
 }
+
+// ==================== Seam 3 跑红探针（临时，随探针分支删除） ====================
+// 目的：证明 locks-peer CI 门禁真的编译并运行本文件（锁不空转）。
+// 该测试只存在于探针分支，PR 验证出红后即关闭 PR / 删分支，不合入 dev。
+
+#[test]
+fn seam3_red_probe_ci_gate_is_real() {
+    panic!("Seam 3 跑红探针：故意红（issue #4，验证后自动关闭本 PR）");
+}
