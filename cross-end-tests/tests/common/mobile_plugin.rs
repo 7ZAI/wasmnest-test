@@ -33,10 +33,10 @@ use wasmnest_wasm_core::wasmtime::component::Component;
 
 /// 移动端随包插件产物（`pnpm run plugins:build` 落点；相对本包根）
 pub const TERMINAL_PLUGIN_WASM: &str =
-    "../../wasmnest/wasmnest-mobile/src-tauri/resources/plugins/mobile/com.wasmnest.terminal-session/bedcode_plugin_terminal_session.wasm";
+    "../../wasmnest/wasmnest-mobile/src-tauri/resources/plugins/mobile/com.wasmnest.bedcode/bedcode_plugin_terminal_session.wasm";
 
 /// 终端会话插件 id（两端同 id、职责不同）
-pub const TERMINAL_PLUGIN_ID: &str = "com.wasmnest.terminal-session";
+pub const TERMINAL_PLUGIN_ID: &str = "com.wasmnest.bedcode";
 
 /// 主连接目标替身：返回本进程桌面服务器地址（`host-connection.primary-target` 真源）
 struct DesktopTarget {
@@ -188,10 +188,10 @@ impl MobilePluginWorld {
         terminal_stream_gateway().stats()
     }
 
-    /// 链路状态快照（`terminal-session.get-state`；前端对账的同一观测面）
+    /// 链路状态快照（`bedcode.get-state`；前端对账的同一观测面）
     pub async fn state(&self, session_id: &str) -> serde_json::Value {
         self.invoke(
-            "terminal-session.get-state",
+            "bedcode.get-state",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await

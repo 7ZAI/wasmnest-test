@@ -33,7 +33,7 @@ use common::mobile_plugin::MobilePluginWorld;
 /// api 声明为双参 `(method, params)` → SDK 宏按元组反序列化，故 params 传**数组**。
 async fn auth_grant(method: &str, params: serde_json::Value) -> serde_json::Value {
     desktop_ctx::plugin_api_call(
-        "com.wasmnest.terminal-session.auth-grant",
+        "com.wasmnest.bedcode.auth-grant",
         serde_json::json!([method, params]),
     )
     .await
@@ -122,7 +122,7 @@ async fn key_rotation_keeps_previous_token_usable_from_mobile() {
     let config_id = desktop_ctx::seed_shell_config("cross-end-rotate").await;
     let start = world
         .invoke(
-            "terminal-session.start-session",
+            "bedcode.start-session",
             serde_json::json!({ "configId": config_id, "cols": 100, "rows": 30 }),
         )
         .await
@@ -139,7 +139,7 @@ async fn key_rotation_keeps_previous_token_usable_from_mobile() {
     world.page_subscribe(&session_id, mobile_ctx::output_channel(outputs.clone()));
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -148,7 +148,7 @@ async fn key_rotation_keeps_previous_token_usable_from_mobile() {
     // 端点认证放行 = 真数据可流：让真实 PTY 产出一段输出
     world
         .invoke(
-            "terminal-session.send-http-input",
+            "bedcode.send-http-input",
             serde_json::json!({ "sessionId": session_id, "data": "echo ROTATE_GRACE_OK\n" }),
         )
         .await
@@ -158,14 +158,14 @@ async fn key_rotation_keeps_previous_token_usable_from_mobile() {
     // ==================== 收尾 ====================
     world
         .invoke(
-            "terminal-session.stop-session",
+            "bedcode.stop-session",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
         .expect("收尾停止会话命令可调用");
     world
         .invoke(
-            "terminal-session.remove",
+            "bedcode.remove",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await

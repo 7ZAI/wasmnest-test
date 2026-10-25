@@ -421,7 +421,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         desktop_request(
             "p004b3",
             "GET",
-            &format!("{base}/api/plugin/com.wasmnest.terminal-session/task-queue/list?session_id={session_id}"),
+            &format!("{base}/api/plugin/com.wasmnest.bedcode/task-queue/list?session_id={session_id}"),
             None,
         ),
         None,

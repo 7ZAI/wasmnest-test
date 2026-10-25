@@ -70,7 +70,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
     let config_id = desktop_ctx::seed_shell_config("cross-end-lifecycle").await;
     let start = world
         .invoke(
-            "terminal-session.start-session",
+            "bedcode.start-session",
             serde_json::json!({ "configId": config_id, "cols": 90, "rows": 25 }),
         )
         .await
@@ -84,7 +84,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
     world.page_subscribe(&session_id, mobile_ctx::output_channel(outputs.clone()));
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -109,7 +109,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
 
     // ==================== L-003 端点注销：显性失败而非空数据 ====================
     let denied = world
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("L-003 列表命令可调用（拒绝走信封 code）");
     assert_ne!(
@@ -132,7 +132,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
 
     // 端点恢复可达且停用前的会话已随实例回收（显式停用的预期语义）
     let list = world
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("L-004 重新激活后端点必须恢复可达");
     assert_eq!(list["code"], 0, "L-004 端点应恢复：{list}");
@@ -146,7 +146,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
     // 恢复后能建新会话并重新进入 live（链路重建能力）
     let start2 = world
         .invoke(
-            "terminal-session.start-session",
+            "bedcode.start-session",
             serde_json::json!({ "configId": config_id, "cols": 90, "rows": 25 }),
         )
         .await
@@ -159,7 +159,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
     world.page_subscribe(&session2, mobile_ctx::output_channel(outputs.clone()));
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session2 }),
         )
         .await
@@ -168,7 +168,7 @@ async fn plugin_deactivation_is_visible_to_the_mobile_side() {
 
     // ==================== 收尾 ====================
     world
-        .invoke("terminal-session.remove", serde_json::json!({ "sessionId": session2 }))
+        .invoke("bedcode.remove", serde_json::json!({ "sessionId": session2 }))
         .await
         .expect("remove 可调用");
     tokio::time::sleep(Duration::from_millis(200)).await;

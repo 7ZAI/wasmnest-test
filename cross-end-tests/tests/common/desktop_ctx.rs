@@ -29,9 +29,9 @@ use wasmnest_desktop_lib::system::info::SystemInfo;
 use wasmnest_desktop_lib::wasm_core::PluginHost;
 use wasmnest_desktop_lib::AppConfig;
 
-/// 认证中心 / 会话真源插件 id（`com.wasmnest.terminal-session`：配对、JWT 签发、
+/// 认证中心 / 会话真源插件 id（`com.wasmnest.bedcode`：配对、JWT 签发、
 /// 会话登记域、WS 端点编排全在它自己进程内）
-pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.terminal-session";
+pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.bedcode";
 
 /// 常驻事件通道端点后缀（插件 manifest `contributes.wsEndpoints` 声明值；宿主拼出
 /// 完整挂载路径 `/ws/plugin/<plugin-id>/session-control`）
@@ -266,7 +266,7 @@ pub async fn activate_session_center() {
         .plugin_host()
         .activate_plugin(SESSION_PLUGIN_ID, false)
         .await
-        .expect("activate com.wasmnest.terminal-session (bundled artifact)");
+        .expect("activate com.wasmnest.bedcode (bundled artifact)");
 }
 
 async fn init_app_context_inner(activate_center: bool) {
@@ -335,7 +335,7 @@ async fn init_app_context_inner(activate_center: bool) {
             plugin_host
                 .activate_plugin(SESSION_PLUGIN_ID, false)
                 .await
-                .expect("activate com.wasmnest.terminal-session (bundled artifact)");
+                .expect("activate com.wasmnest.bedcode (bundled artifact)");
         }
         let _ = INIT.set(());
     }
@@ -496,7 +496,7 @@ pub async fn try_plugin_command(
 /// 播种一条可直接启动的会话配置（bash，工作目录临时目录），返回 config id
 pub async fn seed_shell_config(name: &str) -> String {
     let config = plugin_api_call(
-        "com.wasmnest.terminal-session.config-upsert",
+        "com.wasmnest.bedcode.config-upsert",
         serde_json::json!({
             "name": name,
             "environment": "linux",

@@ -19,7 +19,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
 /// 认证中心 / 会话真源插件 id（与 desktop_ctx / harness 同值）
-pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.terminal-session";
+pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.bedcode";
 
 /// 单次 rpc 往返预算（桌面进程初始化 + cranelift AOT 编译可达数秒）
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);

@@ -1,6 +1,6 @@
 //! 场景（两进程版，2026-10-15）：终端流跨端闭环——**桌面真实服务器进程**
 //! （`desktop-harness` bin：真认证中心插件 + 真 bash PTY）↔ **移动真插件产物**
-//! （`com.wasmnest.terminal-session` 移动侧 wasm，本进程内真实运行 + 真宿主窄转发）
+//! （`com.wasmnest.bedcode` 移动侧 wasm，本进程内真实运行 + 真宿主窄转发）
 //! 经真实 TCP 互连。
 //!
 //! ## 与单进程版 `terminal_ws_flow.rs` 的关系
@@ -140,7 +140,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     world.page_subscribe(&session_id, mobile_ctx::output_channel(outputs.clone()));
     world
         .invoke(
-            "terminal-session.prewarm",
+            "bedcode.prewarm",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -166,7 +166,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let head_marker = "CROSS_END_HEAD_7F3A";
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -175,7 +175,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     // 先让 shell 打一条独占一行的 head marker（用于后面的重放语义判据）
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({ "sessionId": session_id, "data": format!("echo {head_marker}"), "specialKey": "enter" }),
         )
         .await
@@ -190,7 +190,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let ws_marker = "CROSS_END_WS_INPUT_4B2E";
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({ "sessionId": session_id, "data": format!("echo {ws_marker}"), "specialKey": "enter" }),
         )
         .await
@@ -204,7 +204,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     const SEQ_N: usize = 120;
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({
                 "sessionId": session_id,
                 "data": format!("for i in $(seq 1 {SEQ_N}); do echo SEQ_$i; done"),
@@ -230,7 +230,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let bytes_before_resub = outputs.bytes().len();
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -273,7 +273,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let pseq_begin = outputs.bytes().len();
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({
                 "sessionId": session_id,
                 "data": format!("for i in $(seq 1 {PSEQ_N}); do echo PSEQ_$i; done"),
@@ -327,7 +327,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     // ==================== 收尾 ====================
     world
         .invoke(
-            "terminal-session.remove",
+            "bedcode.remove",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await

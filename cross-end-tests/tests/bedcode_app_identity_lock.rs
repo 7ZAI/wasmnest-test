@@ -17,7 +17,7 @@
 //!
 //! | 契约 | 来源 | 规则 | 预期 |
 //! | --- | --- | --- | --- |
-//! | C1 | V3 / D5 | 双端 `plugin.json` 的 `id` = `com.wasmnest.terminal-session`，且双端同值 | 相等（正例）/ 旧 `com.bedcode.*` 即红（反例） |
+//! | C1 | V3 / D5 | 双端 `plugin.json` 的 `id` = `com.wasmnest.bedcode`，且双端同值 | 相等（正例）/ 旧 `com.bedcode.*` 即红（反例） |
 //! | C2 | V3 / D3 ① | 双端 `name` = `BedCode`（显示名豁免，**不得**被改成 `WasmNest`） | 逐字相等 |
 //! | C3 | V3 / D3 ② | 双端 `rustLibrary` = `bedcode_plugin_terminal_session`（豁免保留） | 逐字相等 |
 //! | C4 | V3 / D3 ③ | 双端目录 slug `wasmnest-{desktop,mobile}/wasm-apps/bedcode/` 在场且含 `plugin.json` | 目录是目录、清单是文件 |
@@ -35,8 +35,8 @@ mod app_paths;
 
 /// 双端（三仓拆分 §5-E7：应用源码住 `<appsRoot>/apps/bedcode/{desktop,mobile}`）
 const END_DIRS: [&str; 2] = ["desktop", "mobile"];
-/// 终态 plugin id（D5：旧 `com.bedcode.terminal-session` 已作废）
-const ID: &str = "com.wasmnest.terminal-session";
+/// 终态 plugin id（D5：旧 `com.bedcode.terminal-session` 已作废；2026-10-25 复由 `com.wasmnest.terminal-session` 改名至今值）
+const ID: &str = "com.wasmnest.bedcode";
 /// 显示名（D3 ① 豁免）
 const DISPLAY_NAME: &str = "BedCode";
 /// rust lib 名（D3 ② 豁免；其 kebab 派生形 `bedcode-plugin-terminal-session` 由

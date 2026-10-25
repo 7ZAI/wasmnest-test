@@ -82,7 +82,7 @@ async fn cross_end_rig_is_wired_end_to_end() {
 
     // ==================== 5. WS 插件端点已登记（认证中心激活期登记） ====================
     // 已注册端点可完成 WS 升级（认证/订阅在场景测试里做，这里只验「路由在」）
-    let registered = format!("ws://127.0.0.1:{port}/ws/plugin/com.wasmnest.terminal-session/terminal");
+    let registered = format!("ws://127.0.0.1:{port}/ws/plugin/com.wasmnest.bedcode/terminal");
     let upgrade = tokio_tungstenite::connect_async(&registered).await;
     assert!(
         upgrade.is_ok(),
@@ -92,7 +92,7 @@ async fn cross_end_rig_is_wired_end_to_end() {
         let _ = ws.close(None).await;
     }
     // 未注册端点必须 404（无 fallback）
-    let unregistered = format!("ws://127.0.0.1:{port}/ws/plugin/com.wasmnest.terminal-session/no-such-endpoint");
+    let unregistered = format!("ws://127.0.0.1:{port}/ws/plugin/com.wasmnest.bedcode/no-such-endpoint");
     let err = tokio_tungstenite::connect_async(&unregistered).await;
     assert!(err.is_err(), "未注册端点必须拒绝（404 无升级），不得静默放行: {err:?}");
 

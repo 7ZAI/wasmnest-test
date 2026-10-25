@@ -1,7 +1,7 @@
 //! 真实应用基准环境。
 //!
 //! 与 bridge 的差别只在**被测物**：这里装载 `wasmnest-desktop` 随包的真实应用
-//! 产物（ai-chatbox / agent-hub / terminal-session(BedCode) / file-transfer），
+//! 产物（ai-chatbox / agent-hub / bedcode(BedCode) / file-transfer），
 //! 命令走同一条生产命令面（`PluginHost::invoke_rust_command`）。
 //!
 //! 隔离策略：
@@ -26,7 +26,7 @@ use crate::support::repo_paths;
 
 pub const AI_CHATBOX: &str = "com.wasmnest.ai-chatbox";
 pub const AGENT_HUB: &str = "com.wasmnest.agent-hub";
-pub const BEDCODE: &str = "com.wasmnest.terminal-session";
+pub const BEDCODE: &str = "com.wasmnest.bedcode";
 pub const FILE_TRANSFER: &str = "com.wasmnest.file-transfer";
 
 /// 被测应用（id = 产物目录名 = manifest id）；顺序即激活顺序。

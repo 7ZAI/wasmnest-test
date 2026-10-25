@@ -3,7 +3,7 @@
 //! 两个子模块（另有独立 resolver 模块 `app_paths` / `repo_paths`，由各测试文件经
 //! `#[path]` 直接编入）：
 //! - [`desktop_ctx`]：进程内无头启动桌面端真实 Actix 服务器 + 激活**真实**
-//!   wasm 认证中心产物（`com.wasmnest.terminal-session`），复刻
+//!   wasm 认证中心产物（`com.wasmnest.bedcode`），复刻
 //!   `wasmnest/wasmnest-desktop/src-tauri/tests/pty_session_chain.rs` 的 `app_handle(None)`
 //!   模式（该模式的先例与理由见该文件头注释）。
 //! - [`mobile_ctx`]：移动端真实客户端装配（目标设备 / 全局 token / 事件与

@@ -121,7 +121,7 @@ async fn pairing_auth_round_trip_against_real_desktop() {
 
     // ==================== C-006 QR 正向：桌面生成 → 移动端换 token ====================
     let qr = desktop_ctx::plugin_api_call(
-        "com.wasmnest.terminal-session.qr-code-generate",
+        "com.wasmnest.bedcode.qr-code-generate",
         // params = 入参值本身（api 声明为 `ttl: u64`），不是 {ttl:300}
         serde_json::json!(300u64),
     )

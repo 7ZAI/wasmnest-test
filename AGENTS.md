@@ -11,11 +11,8 @@
 | 测试与验证规范（单元测试形态 / 禁止交付 / 临时目录 / Seam 3 锁纪律 / 验证底线） | `../wasmnest/docs/public/testing.md` |
 | 版本号管理最佳实践（**只有发布版本时才设置版本号，dev 日常不 bump**；tag 联动） | `../wasmnest/docs/public/versioning.md` |
 | issue 管理规范（GitHub Issues = 跨会话存续 backlog 真源；三层分工 / 落仓规则 / 模板标签 / 关门纪律 / agent 约定） | `../wasmnest/docs/public/issues.md` |
-| LayerFS 开发流程（**强制**：单项目 / 分支与 Commit / 基线核对 / 发布 rebase / 落地 git 与 tree 门禁 / bootstrap / 并行与回退） | `../wasmnest/docs/public/layerfs.md` |
 
 以上与各仓 AGENTS.md 的硬约束**同级别**；通用内容不在本仓复制（本仓特殊：`cross-end-tests/` 的锁以 Rust 测试形态存在，Seam 3 纪律直接适用 public/testing.md §4）。
-
-**LayerFS 强制工作面（2026-10-24）**：本仓项目文件（代码 / 文档 / 配置）的一切读写与命令一律走 LayerFS MCP（`layerfs_*`）；流程与门禁真源 = `../wasmnest/docs/public/layerfs.md`。工具不可用（无工具 / `layerfs_status` 失败 / `sudo` 被 no_new_privs 阻断）⇒ **停手报告**，禁止回退宿主 Edit/Write。唯一例外：该规范自身的 bootstrap 与工具配置；落地同步只允许按 public 文档 §6 执行。
 
 ## 1. 工程导航
 

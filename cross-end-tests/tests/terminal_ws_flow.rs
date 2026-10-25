@@ -6,7 +6,7 @@
 //! 旧版驱动的是宿主 `wasmnest_mobile_lib::terminal_link`（1,363 行）——票 12/15 把
 //! 终端订阅协议整体下沉移动 wasm 插件后，该模块已删除，本场景随之**不编译**（门禁
 //! 死了一段时间，2026-10-15 修复）。新版对面是移动端**随包真产物**
-//! （`com.wasmnest.terminal-session` 移动侧 wasm）在无头宿主上下文里真实运行：
+//! （`com.wasmnest.bedcode` 移动侧 wasm）在无头宿主上下文里真实运行：
 //! WS 连接 / jwt 首帧 / 输出门控 / 窄转发全部是真实现，桌面端每一帧都由真实插件 + 真实
 //! PTY 生成。
 //!
@@ -104,7 +104,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let config_id = desktop_ctx::seed_shell_config("cross-end-terminal").await;
     let start = world
         .invoke(
-            "terminal-session.start-session",
+            "bedcode.start-session",
             serde_json::json!({ "configId": config_id, "cols": 120, "rows": 40 }),
         )
         .await
@@ -121,7 +121,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     world.page_subscribe(&session_id, mobile_ctx::output_channel(outputs.clone()));
     world
         .invoke(
-            "terminal-session.prewarm",
+            "bedcode.prewarm",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -146,7 +146,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let head_marker = "CROSS_END_HEAD_7F3A";
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -155,7 +155,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     // 先让 shell 打一条独占一行的 head marker（用于后面的重放语义判据）
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({ "sessionId": session_id, "data": format!("echo {head_marker}"), "specialKey": "enter" }),
         )
         .await
@@ -170,7 +170,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let ws_marker = "CROSS_END_WS_INPUT_4B2E";
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({ "sessionId": session_id, "data": format!("echo {ws_marker}"), "specialKey": "enter" }),
         )
         .await
@@ -184,7 +184,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     const SEQ_N: usize = 120;
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({
                 "sessionId": session_id,
                 "data": format!("for i in $(seq 1 {SEQ_N}); do echo SEQ_$i; done"),
@@ -209,7 +209,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let bytes_before_resub = outputs.bytes().len();
     world
         .invoke(
-            "terminal-session.subscribe",
+            "bedcode.subscribe",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -252,7 +252,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     let pseq_begin = outputs.bytes().len();
     world
         .invoke(
-            "terminal-session.send-input",
+            "bedcode.send-input",
             serde_json::json!({
                 "sessionId": session_id,
                 "data": format!("for i in $(seq 1 {PSEQ_N}); do echo PSEQ_$i; done"),
@@ -285,7 +285,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     // ==================== C-007 停止 → 链路终态 + 通道不再增长 ====================
     let stop = world
         .invoke(
-            "terminal-session.stop-session",
+            "bedcode.stop-session",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -305,7 +305,7 @@ async fn real_pty_output_reaches_mobile_plugin_page_channel() {
     // ==================== 收尾 ====================
     world
         .invoke(
-            "terminal-session.remove",
+            "bedcode.remove",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await

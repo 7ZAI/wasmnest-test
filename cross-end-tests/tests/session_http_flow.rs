@@ -1,7 +1,7 @@
 //! 场景 3（2026-10-15 重写）：会话控制 HTTP 面（移动**真实插件** ↔ 桌面真实插件）
 //!
 //! 移动端的会话 HTTP 客户端（原 `wasmnest_mobile_lib::session::http`）已随票 13
-//! 下沉到移动 wasm 插件（`terminal-session.*` 命令，经 `host-http` + 宿主代注
+//! 下沉到移动 wasm 插件（`bedcode.*` 命令，经 `host-http` + 宿主代注
 //! JWT 打桌面 `/api/sessions*`）。本文件对面是**随包真产物**在无头宿主里真实运行：
 //! 请求字节由插件生成、应答字节由桌面真实插件生成。
 //!
@@ -71,7 +71,7 @@ async fn session_http_surface_matches_real_desktop() {
     // ==================== C-005 未知 configId → 1002（先跑反例，避免污染后续） ====================
     let bad = world
         .invoke(
-            "terminal-session.start-session",
+            "bedcode.start-session",
             serde_json::json!({ "configId": "config-does-not-exist" }),
         )
         .await
@@ -89,7 +89,7 @@ async fn session_http_surface_matches_real_desktop() {
     // ==================== C-001 建会话 ====================
     let start = world
         .invoke(
-            "terminal-session.start-session",
+            "bedcode.start-session",
             serde_json::json!({ "configId": config_id, "cols": 100, "rows": 30 }),
         )
         .await
@@ -103,7 +103,7 @@ async fn session_http_surface_matches_real_desktop() {
 
     // ==================== C-002 列表可查 ====================
     let list = world
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("C-002 列表命令可调用");
     assert_eq!(list["code"], 0, "C-002 列表应成功：{list}");
@@ -117,7 +117,7 @@ async fn session_http_surface_matches_real_desktop() {
     // ==================== C-007 特殊键写入被桌面接受 ====================
     let key_input = world
         .invoke(
-            "terminal-session.send-http-input",
+            "bedcode.send-http-input",
             serde_json::json!({ "sessionId": session_id, "data": "", "specialKey": "ctrl+c" }),
         )
         .await
@@ -128,16 +128,16 @@ async fn session_http_surface_matches_real_desktop() {
     // 这条**不对称**契约两端必须一致（移动端重试逻辑按它写）
     let ghost = "00000000-0000-0000-0000-0000000000ff";
     let before = world
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("C-006 取基线列表");
     for (cmd, args) in [
         (
-            "terminal-session.send-http-input",
+            "bedcode.send-http-input",
             serde_json::json!({ "sessionId": ghost, "data": "x" }),
         ),
         (
-            "terminal-session.stop-session",
+            "bedcode.stop-session",
             serde_json::json!({ "sessionId": ghost }),
         ),
     ] {
@@ -146,14 +146,14 @@ async fn session_http_surface_matches_real_desktop() {
     }
     let removed = world
         .invoke(
-            "terminal-session.remove-session",
+            "bedcode.remove-session",
             serde_json::json!({ "sessionId": ghost }),
         )
         .await
         .expect("C-006 remove 命令可调用");
     assert_eq!(removed["code"], 0, "C-006 移除不存在的会话必须幂等成功：{removed}");
     let after_ghost = world
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("C-006 幂等移除后读列表");
     assert_eq!(
@@ -165,7 +165,7 @@ async fn session_http_surface_matches_real_desktop() {
     // ==================== C-003 停止 → 终态 ====================
     let stopped = world
         .invoke(
-            "terminal-session.stop-session",
+            "bedcode.stop-session",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
@@ -176,7 +176,7 @@ async fn session_http_surface_matches_real_desktop() {
     let mut terminal_status = None;
     for _ in 0..120 {
         let list = world
-            .invoke("terminal-session.list-sessions", serde_json::json!({}))
+            .invoke("bedcode.list-sessions", serde_json::json!({}))
             .await
             .expect("C-003 终态轮询读列表");
         if let Some(entry) = list["data"]
@@ -200,14 +200,14 @@ async fn session_http_surface_matches_real_desktop() {
     // ==================== C-004 移除 → 列表不再含 ====================
     let removed = world
         .invoke(
-            "terminal-session.remove-session",
+            "bedcode.remove-session",
             serde_json::json!({ "sessionId": session_id }),
         )
         .await
         .expect("C-004 移除命令可调用");
     assert_eq!(removed["code"], 0, "C-004 移除应成功：{removed}");
     let after = world
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("C-004 移除后读列表");
     assert!(

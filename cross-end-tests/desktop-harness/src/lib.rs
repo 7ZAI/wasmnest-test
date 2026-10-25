@@ -34,9 +34,9 @@ use wasmnest_discovery_engine::advertiser::MdnsAdvertiser;
 use wasmnest_server_websocket::endpoint;
 use wasmnest_server_websocket::registry::{ClientSummary, WsSessionRegistry};
 
-/// 认证中心 / 会话真源插件 id（`com.wasmnest.terminal-session`：配对、JWT 签发、
+/// 认证中心 / 会话真源插件 id（`com.wasmnest.bedcode`：配对、JWT 签发、
 /// 会话登记域、WS 端点编排全在它自己进程内）
-pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.terminal-session";
+pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.bedcode";
 
 // ==================== 装配守卫（本进程只含桌面侧模块） ====================
 
@@ -213,7 +213,7 @@ pub async fn activate_session_center() {
         .plugin_host()
         .activate_plugin(SESSION_PLUGIN_ID, false)
         .await
-        .expect("activate com.wasmnest.terminal-session (bundled artifact)");
+        .expect("activate com.wasmnest.bedcode (bundled artifact)");
 }
 
 /// 启动真实 HTTP/WS 服务器（Actix，`start_http_server` 纯函数、不依赖 AppHandle）
@@ -301,7 +301,7 @@ pub async fn try_plugin_command(plugin_id: &str, command: &str, args: Value) -> 
 /// 播种一条可直接启动的会话配置（bash，工作目录临时目录），返回 config id
 pub async fn seed_shell_config(name: &str) -> String {
     let config = try_plugin_api_call(
-        "com.wasmnest.terminal-session.config-upsert",
+        "com.wasmnest.bedcode.config-upsert",
         json!({
             "name": name,
             "environment": "linux",

@@ -89,7 +89,7 @@ async fn no_center_and_bad_credential_are_denied_fail_closed() {
     mobile_ctx::remember_token("not-a-real-token");
     let world_no_center = MobilePluginWorld::load_terminal_plugin(port, "not-a-real-token").await;
     let denied = world_no_center
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("F-001 列表命令可调用（拒绝走信封 code）");
     assert_envelope_denial(&denied, "F-001 无中心在册");
@@ -109,7 +109,7 @@ async fn no_center_and_bad_credential_are_denied_fail_closed() {
     mobile_ctx::remember_token("forged.jwt.token");
     let world_forged = MobilePluginWorld::load_terminal_plugin(port, "forged.jwt.token").await;
     let forged = world_forged
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("F-004 列表命令可调用");
     assert_envelope_denial(&forged, "F-004 伪造凭证");
@@ -129,7 +129,7 @@ async fn no_center_and_bad_credential_are_denied_fail_closed() {
     mobile_ctx::remember_token(&token);
     let world_real = MobilePluginWorld::load_terminal_plugin(port, &token).await;
     let allowed = world_real
-        .invoke("terminal-session.list-sessions", serde_json::json!({}))
+        .invoke("bedcode.list-sessions", serde_json::json!({}))
         .await
         .expect("F-003 真凭证下命令可调用");
     assert_eq!(allowed["code"], 0, "F-003 真凭证必须放行：{allowed}");
@@ -144,13 +144,13 @@ async fn no_center_and_bad_credential_are_denied_fail_closed() {
     let ghost = "crossend-failclosed-ghost-session";
     world_forged.page_subscribe(ghost, mobile_ctx::output_channel(outputs.clone()));
     world_forged
-        .invoke("terminal-session.subscribe", serde_json::json!({ "sessionId": ghost }))
+        .invoke("bedcode.subscribe", serde_json::json!({ "sessionId": ghost }))
         .await
         .expect("F-005 subscribe 命令可调用（拒绝发生在 WS 认证闸门）");
     // 给足多轮重连的时间窗：任一轮都不许通过认证闸门
     tokio::time::sleep(Duration::from_secs(4)).await;
     let state = world_forged
-        .invoke("terminal-session.get-state", serde_json::json!({ "sessionId": ghost }))
+        .invoke("bedcode.get-state", serde_json::json!({ "sessionId": ghost }))
         .await
         .expect("F-005 get-state 可调用");
     assert_ne!(
