@@ -208,11 +208,13 @@ fn generated_copies_are_marked_and_consumed_not_copied() {
 #[test]
 fn every_permission_has_an_enforcement_point() {
     // 扫描面 = 能力仓 wasm-core 源码（机制层门禁落点）+ 桌面宿主源码（端侧域门禁
-    // 落点）。移动宿主不开桌面专属域，其门禁经 wasm-core 同一路径（原锁同口径）。
+    // 落点）+ 移动宿主源码（移动专属位门禁落点；批 2 收口 issue #36：`notify` 位
+    // 上提双端真源后其唯一落点在移动宿主 `plugin/notify.rs`，扫描面随之扩入）。
     let root = repo_root();
     let mut files = Vec::new();
     collect_rs(&repo_paths::lib_root().join("wasmnest-wasm-core/src"), &mut files);
     collect_rs(&root.join("wasmnest-desktop/src-tauri/src"), &mut files);
+    collect_rs(&root.join("wasmnest-mobile/src-tauri/src"), &mut files);
     assert!(files.len() > 20, "宿主插件源码文件数异常，扫描未生效");
 
     let mut referenced: BTreeSet<String> = BTreeSet::new();

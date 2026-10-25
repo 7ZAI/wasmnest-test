@@ -156,19 +156,35 @@ mod server_base {
 mod server_http {
     use super::*;
 
-    /// [`EndpointAuth`] 定义块（含注释）与 SDK `types.rs` 逐字一致
+    /// [`EndpointAuth`] 定义与 SDK `types/contributions.rs` 语义一致
     ///
-    /// 本地结束标记是非 doc 的 `//`（能力仓侧文件末尾无被文档化的项，`///` 会成悬空
-    /// doc 编译错误）；比对块本体不变。
+    /// 2026-10-25 大文件拆分 types.rs 目录化，锁随迁；同批发现两侧 `parse_with`
+    /// 错误 format! 的折行口径不同（lib crate 自带 rustfmt.toml 宽松单行启发式 vs
+    /// SDK 默认配置），逐字块比对结构性不可满足——降为**语义行比对**：枚举体 /
+    /// 档位臂逐行钉死，未知档位错误消息字面量要求双侧同时在场。
     #[test]
     fn endpoint_auth_copy_matches_sdk() {
-        let sdk = desktop_sdk_src("types.rs");
+        let sdk = desktop_sdk_src("types/contributions.rs");
         let local = local_wire("wasmnest-server-http");
-        let sdk_block = extract_block(&sdk, "/// 端点认证档位", "/// 一条 HTTP 端点声明");
-        let local_block = extract_block(&local, "/// 端点认证档位", "// 一条 HTTP 端点声明");
-        assert_eq!(
-            sdk_block, local_block,
-            "EndpointAuth 自持副本与桌面 SDK 原版漂移——能力域脱绑 P1：双侧必须逐字一致"
+        for prefix in [
+            "/// 端点认证档位",
+            "pub enum EndpointAuth {",
+            "pub const fn as_str(self) -> &'static str {",
+            "pub fn parse_with(raw: Option<&str>, default: Self) -> Result<Self, String> {",
+            "\"\" => Ok(default),",
+            "\"none\" => Ok(Self::None),",
+            "\"jwt\" => Ok(Self::Jwt),",
+        ] {
+            assert_eq!(
+                extract_line(&sdk, prefix),
+                extract_line(&local, prefix),
+                "{prefix} 自持副本与桌面 SDK 原版漂移——能力域脱绑 P1：双侧必须语义一致"
+            );
+        }
+        let msg = "unknown auth '{}' (expected \\\"none\\\" or \\\"jwt\\\")";
+        assert!(
+            sdk.contains(msg) && local.contains(msg),
+            "EndpointAuth 未知档位错误消息漂移——能力域脱绑 P1：双侧必须同步改"
         );
     }
 
@@ -204,16 +220,31 @@ mod server_websocket {
         );
     }
 
-    /// [`EndpointAuth`] 定义块（含注释）与 SDK `types.rs` 逐字一致
+    /// [`EndpointAuth`] 定义与 SDK `types/contributions.rs` 语义一致（迁移说明见
+    /// server_http 同名测试：types.rs 目录化锁随迁 + 两侧 fmt 口径不同降为语义行比对）
     #[test]
     fn endpoint_auth_copy_matches_sdk() {
-        let sdk = desktop_sdk_src("types.rs");
+        let sdk = desktop_sdk_src("types/contributions.rs");
         let local = local_wire("wasmnest-server-websocket");
-        let sdk_block = extract_block(&sdk, "/// 端点认证档位", "/// 一条 HTTP 端点声明");
-        let local_block = extract_block(&local, "/// 端点认证档位", "/// 一条 HTTP 端点声明");
-        assert_eq!(
-            sdk_block, local_block,
-            "EndpointAuth 自持副本与桌面 SDK 原版漂移——能力域脱绑 P3：双侧必须逐字一致"
+        for prefix in [
+            "/// 端点认证档位",
+            "pub enum EndpointAuth {",
+            "pub const fn as_str(self) -> &'static str {",
+            "pub fn parse_with(raw: Option<&str>, default: Self) -> Result<Self, String> {",
+            "\"\" => Ok(default),",
+            "\"none\" => Ok(Self::None),",
+            "\"jwt\" => Ok(Self::Jwt),",
+        ] {
+            assert_eq!(
+                extract_line(&sdk, prefix),
+                extract_line(&local, prefix),
+                "{prefix} 自持副本与桌面 SDK 原版漂移——能力域脱绑 P3：双侧必须语义一致"
+            );
+        }
+        let msg = "unknown auth '{}' (expected \\\"none\\\" or \\\"jwt\\\")";
+        assert!(
+            sdk.contains(msg) && local.contains(msg),
+            "EndpointAuth 未知档位错误消息漂移——能力域脱绑 P3：双侧必须同步改"
         );
     }
 
@@ -255,6 +286,29 @@ mod server_websocket {
                 "{prefix} 自持副本与桌面 SDK 原版漂移——能力域脱绑 P3：双侧必须逐字一致"
             );
         }
+    }
+}
+
+// ==================== abi-form（批 2 收口，平台仓 issue #36） ====================
+
+mod abi_form {
+    use super::*;
+
+    /// [`FORM_COMPONENT`] 值：core 真源（`manager::runtime`）与 SDK guest 拷贝一致
+    ///
+    /// 宿主装配 `FormPolicy.form` 与 guest `abi-form.form()` 导出配对：值漂移 =
+    /// 加载期形态误判（组件被整体拒绝或形态回退）。批 2 真源上提 core 后以行级
+    /// 比对钉死常量行。
+    #[test]
+    fn form_component_value_matches_core_truth() {
+        let core = lib_file("wasmnest-wasm-core", "src/manager/runtime.rs");
+        let sdk = desktop_sdk_src("form.rs");
+        let core_line = extract_line(&core, "pub const FORM_COMPONENT: u32 =");
+        let sdk_line = extract_line(&sdk, "pub const FORM_COMPONENT: u32 =");
+        assert_eq!(
+            core_line, sdk_line,
+            "FORM_COMPONENT 值漂移：宿主装配（wasm-core 真源）与 guest 导出（SDK 拷贝）必须同步改"
+        );
     }
 }
 
