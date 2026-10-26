@@ -8040,40 +8040,28 @@ name = "wasmnest-desktop-runtime"
 version = "0.0.1"
 dependencies = [
  "actix",
- "actix-rt",
  "actix-web",
- "actix-web-actors",
- "aes-gcm",
- "anyhow",
  "async-trait",
  "base64 0.22.1",
- "chacha20poly1305",
  "chrono",
  "dbus",
  "dirs 6.0.0",
  "encoding_rs",
  "futures-util",
  "hex",
- "hkdf",
  "inventory",
  "jsonwebtoken",
- "libc",
  "local-ip-address",
  "mdns-sd",
  "nosleep",
  "notify",
  "nu-ansi-term",
  "p256",
- "portable-pty",
- "rand 0.8.8",
  "regex",
  "reqwest 0.12.28",
- "rsa",
  "rusqlite",
  "serde",
  "serde_json",
- "sha2",
- "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -8083,7 +8071,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tauri-plugin-wdio",
- "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -8096,7 +8083,6 @@ dependencies = [
  "wasmnest-discovery-engine",
  "wasmnest-host-kit",
  "wasmnest-link-crypto",
- "wasmnest-plugin-api",
  "wasmnest-pty-engine",
  "wasmnest-server-base",
  "wasmnest-server-core",
@@ -8105,11 +8091,8 @@ dependencies = [
  "wasmnest-server-websocket",
  "wasmnest-wasm-core",
  "wasmtime",
- "wasmtime-wasi",
  "webkit2gtk",
  "windows-sys 0.61.2",
- "x25519-dalek",
- "zip",
 ]
 
 [[package]]
@@ -8175,13 +8158,11 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
- "encoding_rs",
  "flume",
  "futures-util",
  "hex",
  "hostname",
  "inventory",
- "jsonwebtoken",
  "local-ip-address",
  "log",
  "mdns-sd",
@@ -8200,18 +8181,13 @@ dependencies = [
  "tauri-plugin-machine-uid",
  "tauri-plugin-opener",
  "tauri-plugin-os",
- "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
- "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "wasmnest-discovery-engine",
- "wasmnest-host-api-core",
  "wasmnest-host-kit",
  "wasmnest-link-crypto",
- "wasmnest-plugin-api-mobile",
  "wasmnest-server-base",
  "wasmnest-server-http",
  "wasmnest-server-peer-net",
@@ -8223,16 +8199,6 @@ dependencies = [
 
 [[package]]
 name = "wasmnest-plugin-api"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "inventory",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "wasmnest-plugin-api-mobile"
 version = "0.0.1"
 dependencies = [
  "anyhow",
