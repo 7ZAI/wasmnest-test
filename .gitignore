@@ -1,0 +1,18 @@
+# ==================== 跨端测试仓（wasmnest-test） .gitignore ====================
+# 本仓为跨端真实互连测试 rig（独立 Cargo workspace），只含 Rust。
+
+# 构建产物（容器下每个测试工程各有自己的 Cargo workspace / target）
+**/target/
+**/*.rs.bk
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# 工具产物目录（agent 记忆等；同平台仓 / 能力仓口径——只提交源码）
+.codebuddy/
+
+# 说明：Cargo.lock **入库**（rig 依赖图 = 两端 lib 并集 + 测试 dev 依赖，
+# 锁定后保证任一端依赖图变化时本仓构建可复现、漂移可见）。

@@ -1,0 +1,49 @@
+name: Bug / 门禁红
+description: 提交缺陷或测试 / 锁红。必填：现象 / 复现场景 / 期望 vs 实际 / 涉及链路与契约版本。
+title: "[bug] "
+labels: ["kind:bug"]
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象
+      description: 实际发生了什么，含报错 / 日志关键行
+    validations:
+      required: true
+  - type: input
+    id: scenario
+    attributes:
+      label: 涉及场景 / 目标
+      description: 测试名（tests/ 文件 + 场景名）或锁名；#[ignore] 场景须点名
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 最小复现；附可跑命令（含工作目录，跨仓路径见 repo_paths.rs）
+      value: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望 vs 实际
+      value: |
+        - 期望：
+        - 实际：
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 平台与版本
+      description: 桌面 / 移动宿主侧；契约版本（@wasmnest:plugin@x.y.z）、WIT tag
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 已知线索
+      description: 排查到哪一步、相关 issue / 提交（owner/repo#n 或 hash）；暂缺写「待补」
