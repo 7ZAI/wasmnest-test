@@ -19,7 +19,7 @@
 #    CROSS_REPO_TOKEN extraheader 方案补鉴权。
 #
 # 分层口径（issue 允许按目录过滤起步）：
-#  - PR/push 门禁 = locks-peer：**不依赖随包插件产物**的稳定子集——
+#  - PR 门禁 = locks-peer：**不依赖随包插件产物**的稳定子集——
 #      ① 六个源码文本锁（wire/权限/命令词汇/mDNS 单例/应用身份/单产物接线）：
 #        纯文件扫描，只读三仓源码（resolver：tests/common/repo_paths.rs / app_paths.rs）；
 #      ② 五个 peer 集成测试（进程内双节点、回环互指、真实 mTLS 直连，无 mDNS 组播、
@@ -37,8 +37,9 @@ name: ci
 
 on:
   pull_request:
-  push:
-    branches: [dev] # 集成分支 = 默认分支 dev
+  # **push 不触发**（用户 2026-10-28 定：四仓 `dev` 推送一律不跑 GitHub CI）。本仓唯一
+  # 常驻远端分支就是 `dev`（跨端门禁要三仓同场检出，光跑一遍就要十几分钟），改为
+  # 本地验证 + PR + nightly + 手跑。
   schedule:
     # nightly 04:10 北京时间（UTC 20:10）：跑 full 全量面（与平台仓 nightly 错峰）
     - cron: '10 20 * * *'
