@@ -31,15 +31,16 @@
 #
 # 与 husky pre-commit 的关系：本仓无 pre-commit 钩子，CI 即唯一门禁。
 #
-# 分支说明：默认 / 集成分支 = dev（仓唯一常驻远端分支，gh repo view 核实）。
+# 分支说明：集成分支 = dev；默认分支 = main（uat 封版快照）。GitHub 的 schedule 只在
+# 默认分支的 workflow 上触发，故 full job 在 schedule 事件下显式检出 dev——nightly 要
+# 验证的是集成分支与三仓 dev 的组合，而不是冻结快照。
 # ==============================================================================
 name: ci
 
 on:
   pull_request:
-  # **push 不触发**（用户 2026-10-28 定：四仓 `dev` 推送一律不跑 GitHub CI）。本仓唯一
-  # 常驻远端分支就是 `dev`（跨端门禁要三仓同场检出，光跑一遍就要十几分钟），改为
-  # 本地验证 + PR + nightly + 手跑。
+  # **push 不触发**（用户 2026-10-28 定：四仓 `dev` 推送一律不跑 GitHub CI）。跨端门禁
+  # 要三仓同场检出，光跑一遍就要十几分钟，改为本地验证 + PR + nightly + 手跑。
   schedule:
     # nightly 04:10 北京时间（UTC 20:10）：跑 full 全量面（与平台仓 nightly 错峰）
     - cron: '10 20 * * *'
@@ -204,6 +205,9 @@ jobs:
         with:
           path: wasmnest-test
           fetch-depth: 1
+          # schedule 在默认分支（main = uat 封版快照）的 workflow 上触发，但 nightly
+          # 要验证集成分支 dev；其余事件留空 = checkout 默认的触发 ref（PR merge ref 等）。
+          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
 
       - name: 安装 tauri Linux 构建依赖
         run: |
@@ -326,6 +330,25 @@ jobs:
 
       - name: wasm unknown-unknown target（mobile 应用 wasm）
         run: rustup target add wasm32-unknown-unknown
+
+      # 插件产物里的 Go 后端（ai-chatbox 等）需要钉版 Go / TinyGo / wasm-tools；
+      # 钉版真源 = 平台仓 plugin-sdk-desktop/go/README.md（issue #21 Phase 0 实证）。
+      # 只有 plugins:build 消费这些工具链，锁/peer 子集（locks-peer）无需安装。
+      - name: 安装 Go（钉版 1.27.3，Go 后端插件）
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+
+      - name: 安装 TinyGo（钉版 0.43.0，wasip2 组件构建）
+        run: |
+          curl -fsSL https://github.com/tinygo-org/tinygo/releases/download/v0.43.0/tinygo0.43.0.linux-amd64.tar.gz \
+            | tar -xz -C /usr/local
+          echo "/usr/local/tinygo/bin" >> "$GITHUB_PATH"
+
+      - name: 安装 wasm-tools（钉版 1.240.0，TinyGo 组件化外部依赖）
+        uses: bytecodealliance/actions/wasm-tools/setup@v1
+        with:
+          version: '1.240.0'
 
       # 重建双端随包插件产物（*_flow 场景的驱动面；缺失时测试按设计 fail-visible 直接红）。
       # WASMNEST_COMPONENTIZE_MANIFEST：移动插件构建的组件化工具 = 桌面 SDK 的
