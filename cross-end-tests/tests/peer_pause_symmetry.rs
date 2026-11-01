@@ -10,7 +10,7 @@
 //! | pull（我拉对端） | 供流方 | 本地暂停/恢复 + 按批取消 | `pull_serve_side_pause_stops_stream_and_resume_completes` / `pull_serve_side_cancel_interrupts_puller_and_keeps_partial` |
 //!
 //! 装配形状与生产一致：两端都挂 [`SharedDirHandler`]（宿主 runtime 持有的复合
-//! 处理器），经真实 mTLS 回环直连驱动。「暂停已生效」只看外部行为——落盘
+//! 处理器），经真实 libp2p 回环直连驱动。「暂停已生效」只看外部行为——落盘
 //! `.part` 尺寸在宽限期内不再增长、期间不出现终态，恢复后内容逐字节一致。
 //!
 //! 拉取方本地暂停、发送方取消、接收方取消已由 `shared_dirs.rs` /

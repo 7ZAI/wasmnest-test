@@ -1,9 +1,9 @@
-//! 双节点测试 harness：进程内多实例、回环端口互指、真实 mTLS 直连。
+//! 双节点测试 harness：进程内多实例、回环端口互指、真实 libp2p（noise/yamux）直连。
 //!
-//! ticket 02 起本 harness 是对等网络行为票的主验证缝：
+//! P1 起本 harness 是对等网络行为票的主验证缝：
 //!
-//! - 占位 listener 经 [`PeerNetNode::start_with_listener`] 移交给节点（Decision 4），
-//!   端口防竞态设计保留但不再由 TestNode 持有到断言结束；
+//! - 占位 listener 的地址经 [`PeerNetNode::start_with_listener`] 交给节点（句柄在
+//!   绑定前释放），端口防竞态设计保留但不再由 TestNode 持有到断言结束；
 //! - 内置 recording 闸门（计数确认回调 + 按脚本应答，默认拒绝）与
 //!   [`EchoHandler`]（证明连通性的最小上层协议）；
 //! - 可信存储注入文件版实例：AC#4/#5 的持久化语义在真实目录上验证。
@@ -19,7 +19,6 @@ use std::time::Duration;
 use wasmnest_server_peer_net::{
     Connection, ConnectionHandler, HandlerFuture, NodeId, NodeIdentity, PeerNetError, PeerNetNode,
     PeerNetNodeConfig, RunningNode, StaticPeerRecord, TrustEvent, TrustStore,
-    verify_cert_matches_node_id,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -245,19 +244,6 @@ async fn two_nodes_hold_distinct_ids_with_mutual_peer_records() {
 }
 
 #[tokio::test]
-async fn every_node_certificate_passes_binding_check() {
-    let nodes = spawn_test_nodes(2).await;
-
-    for node in &nodes {
-        assert!(
-            verify_cert_matches_node_id(node.node.certificate(), node.node.node_id()),
-            "node {} certificate must match its own node_id",
-            node.node.node_id()
-        );
-    }
-}
-
-#[tokio::test]
 async fn restarted_node_keeps_identity_stable_across_reload() {
     let dir = tempfile::tempdir().expect("create tempdir");
 
@@ -322,7 +308,7 @@ async fn accepted_first_connect_establishes_mutual_trust_and_connectivity() {
         .expect("approved first connect must succeed");
 
     // 连通性证明：字节级回声往返
-    assert_echo_roundtrip(&mut conn, b"hello over mtls").await;
+    assert_echo_roundtrip(&mut conn, b"hello over libp2p").await;
 
     // 双向落库：A 侧在收到 Accepted 帧后落库，B 侧在写 Accepted 帧前落库
     assert!(a.node.trust().contains(b.id()), "initiator must persist peer");
@@ -355,9 +341,9 @@ async fn trusted_peer_reconnects_silently_without_callback() {
     assert_echo_roundtrip(&mut second, b"second round").await;
 }
 
-/// AC#3：证书指纹与期望身份不符 → TLS 层拒绝，应用层零感知
+/// AC#3：对端身份与期望身份不符 → 传输层握手后校验拒绝，应用层零感知
 #[tokio::test]
-async fn forged_identity_record_is_rejected_at_tls_layer_without_callbacks() {
+async fn forged_identity_record_is_rejected_at_transport_layer_without_callbacks() {
     let nodes = spawn_test_nodes(3).await;
     let [a, b, c] = nodes.as_slice() else {
         panic!("expected exactly three nodes");
@@ -370,13 +356,13 @@ async fn forged_identity_record_is_rejected_at_tls_layer_without_callbacks() {
     };
     let err = dial_with_timeout(a, &forged)
         .await
-        .expect_err("pinned verifier must reject identity/address mismatch");
+        .expect_err("identity bridge must reject identity/address mismatch");
     assert!(
-        matches!(err, PeerNetError::TlsBindingMismatch { .. }),
-        "expected TlsBindingMismatch, got: {err}"
+        matches!(err, PeerNetError::IdentityMismatch { .. }),
+        "expected IdentityMismatch, got: {err}"
     );
 
-    // TLS 层拒绝不得产生任何应用层事件或信任落库
+    // 传输层拒绝不得产生任何应用层事件或信任落库
     assert_eq!(b.gate.request_count(), 0, "B must stay unaware of the rejected dial");
     assert_eq!(c.gate.request_count(), 0);
     assert!(!a.node.trust().contains(c.id()));
