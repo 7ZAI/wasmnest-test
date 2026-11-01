@@ -263,7 +263,9 @@ fn every_permission_has_an_enforcement_point() {
 fn production_manifests_declare_only_known_vocabulary() {
     let mut checked = 0usize;
 
-    // ① 应用仓桌面端：apps/<slug>/desktop（缺失即 panic，不静默跳过）
+    // ① 应用仓桌面端：apps/<slug>/desktop（缺失即 panic，不静默跳过）。
+    // 当前 3 个：ai-chatbox / bedcode / file-transfer；monitor 等服务型工程住
+    // servers/，不在桌面应用扫描面。
     let apps_dir = app_paths::apps_root().join("apps");
     let mut app_roots: Vec<PathBuf> = Vec::new();
     for entry in fs::read_dir(&apps_dir).expect("应用仓 apps/ 可读") {
@@ -273,8 +275,8 @@ fn production_manifests_declare_only_known_vocabulary() {
         }
     }
     assert!(
-        app_roots.len() >= 4,
-        "应用仓桌面端工程数异常（{} < 4），扫描范围可疑",
+        app_roots.len() >= 3,
+        "应用仓桌面端工程数异常（{} < 3），扫描范围可疑",
         app_roots.len()
     );
 
@@ -315,10 +317,10 @@ fn production_manifests_declare_only_known_vocabulary() {
             checked += 1;
         }
     }
-    // 下限 10 = 4 个桌面 wasm 应用（应用仓 apps/<slug>/desktop）+ bench-test +
-    // SDK 夹具合集 5 份（http/plugin/pty/task/ws）。递归扫描只可能让实测数更多；
-    // 若变小先查扫描范围。（原为 11：含 wasi-test 夹具，该夹具已随三仓拆分批次三
-    // 删除 `plugin-wasi-test` 而消失，基线同步下调。）
+    // 下限 10 = 3 个桌面 wasm 应用（应用仓 apps/<slug>/desktop）+ bench-test +
+    // SDK 夹具合集 + packages/ 递归扫到的其余 manifest（当前实测 16）。递归扫描只
+    // 可能让实测数更多；若变小先查扫描范围。（原为 11：含 wasi-test 夹具，该夹具已
+    // 随三仓拆分批次三删除；应用仓 monitor 等工程迁 servers/ 后桌面应用从 4 降到 3。）
     assert!(
         checked >= 10,
         "实测仅校验了 {checked} 份 manifest（预期 >= 10），扫描范围可疑"
