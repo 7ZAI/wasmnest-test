@@ -341,9 +341,10 @@ jobs:
 
       - name: 安装 TinyGo（钉版 0.43.0，wasip2 组件构建）
         run: |
+          mkdir -p "$HOME/.local/toolchains"
           curl -fsSL https://github.com/tinygo-org/tinygo/releases/download/v0.43.0/tinygo0.43.0.linux-amd64.tar.gz \
-            | tar -xz -C /usr/local
-          echo "/usr/local/tinygo/bin" >> "$GITHUB_PATH"
+            | tar -xz -C "$HOME/.local/toolchains"
+          echo "$HOME/.local/toolchains/tinygo/bin" >> "$GITHUB_PATH"
 
       - name: 安装 wasm-tools（钉版 1.240.0，TinyGo 组件化外部依赖）
         uses: bytecodealliance/actions/wasm-tools/setup@v1
