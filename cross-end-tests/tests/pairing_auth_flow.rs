@@ -120,8 +120,11 @@ async fn pairing_auth_round_trip_against_real_desktop() {
     assert_business_code(&rejected, 1001, "C-005 篡改 token");
 
     // ==================== C-006 QR 正向：桌面生成 → 移动端换 token ====================
+    // QR 生成与 /api/auth/qr-connect 必须落在同一插件实例的进程内 QR 管理器：
+    // 认证 HTTP 面已由 com.wasmnest.auth-center 承接，生成臂也得调它（调 bedcode
+    // 会把 token 存进另一个实例的管理器，qr-connect 必然报 1006）。
     let qr = desktop_ctx::plugin_api_call(
-        "com.wasmnest.bedcode.qr-code-generate",
+        "com.wasmnest.auth-center.qr-code-generate",
         // params = 入参值本身（api 声明为 `ttl: u64`），不是 {ttl:300}
         serde_json::json!(300u64),
     )

@@ -300,6 +300,12 @@ async fn init_app_context_inner(activate_center: bool) {
             None,
         )
         .await;
+        // 私有库根必须在 init_message_bus 之前注入：总线初始化会触发认证中心等
+        // 插件的激活，激活期建表（ensure_schema）读的就是这个根；晚一步则
+        // auth-center 私有库退化为「无头不可用」，配对/信任记录面整体 degraded。
+        plugin_host
+            .wasm_host_ctx()
+            .set_plugin_db_root(Some(plugin_db_root().clone()));
         plugin_host.init_message_bus().await;
         // guest 事件派发器（生产同款）：缺省 `UnwiredGuestEvents` 会让总线投递 fail-visible
         //（会话中心 dispatch 报错 → trap；实测症状 = 插件 api 回调超时）。本 rig 自建
@@ -307,9 +313,6 @@ async fn init_app_context_inner(activate_center: bool) {
         plugin_host.wasm_runtime().set_guest_events(std::sync::Arc::new(
             wasmnest_desktop_lib::plugin::guest_events::DesktopGuestEvents,
         ));
-        plugin_host
-            .wasm_host_ctx()
-            .set_plugin_db_root(Some(plugin_db_root().clone()));
 
         let mdns_advertiser = Arc::new(tokio::sync::RwLock::new(MdnsAdvertiser::new()));
         let system_info = Arc::new(SystemInfo::collect());
