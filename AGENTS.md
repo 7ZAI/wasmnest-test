@@ -25,6 +25,7 @@
 ## 2. 硬约束速查
 
 - 不提交产物：`target/`、临时日志不入库（.gitignore 已覆盖）。
+- **Rust 编写 / 审核（强制 skill）**：任何 Rust 代码（`cross-end-tests/` 的锁与 `desktop-harness`、`perf-tests/` 的 harness）的**编写与审核**，动手前与完成审核时**必须**显式加载并遵循 `/skill:rust-best-practices`（skill 落点 `~/.agents/skills/rust-best-practices/SKILL.md`）；未加载即开始写或评审 = 流程违规，视为未完成交付 / 无效评审。该 skill 是通用惯用法与 API 设计判据层（与 `docs/public/` 通用规范同级），与本仓硬约束（本文件 §2 / public/testing.md 锁纪律 / 跨仓路径铁律）冲突时**以硬约束为准**；其自带的自检命令（fmt / clippy）不替代本仓测试与锁门禁。
 - 测试数据走临时目录，禁止污染真实数据 / 日志目录。
 - 锁纪律：不得删锁 / 缩 glob / 恒真断言；锁清单过期同批更新（Seam 3，public/testing.md §4）。
 - 性能纪律（perf-tests）：只采 release 数字（入口拒绝 debug）；apps 模块要求先构建随包应用产物，缺失 fail-visible；应用数据写入临时 `HOME` 沙箱，退出恢复；数量级门禁是交付面的一部分——不得删测点 / 放宽门限 / 把断言改成恒真，数字变化需在交付说明点名。
