@@ -16,7 +16,7 @@
 
 ## 1. 工程导航
 
-- **工程本体**：`cross-end-tests/` —— Cargo workspace（根 `Cargo.toml`）：主包（互连测试：`tests/` 下 `wire_drift_locks` / `permission_vocabulary_lock` / `mdns_browse_singleton_lock` 等）+ `desktop-harness`（桌面侧测试夹具二进制）。目标构建见各 crate `.cargo/config.toml` / 头注释。
+- **工程本体**：`cross-end-tests/` —— Cargo workspace（根 `Cargo.toml`）：主包（互连测试：`tests/` 下 `wire_drift_locks` / `permission_vocabulary_lock` / `mdns_browse_singleton_lock` 等）+ `desktop-harness`（桌面侧测试夹具二进制）+ `relay-transport`（穿透传输面：真实 `wasmnest-relay` 服务端 ↔ 引擎客户端；独立成员以免拖宿主 lib 进编译）。目标构建见各 crate `.cargo/config.toml` / 头注释。
 - **性能基准**：`perf-tests/` —— 独立 Cargo workspace（`perf-harness` 二进制 + `perf_tests` 库）：`bridge` 模块（迁移自平台仓 `wasm_bridge_bench`，含 `M` 调用矩阵）+ `boundary` 模块（N 个应用同时常驻的规模边界 / 宿主 → 前端注册表投影）+ `apps` 模块（四个随包真实应用）。用法 / 场景 / 门禁见 [`perf-tests/README.md`](perf-tests/README.md)，术语见 [`perf-tests/GLOSSARY.md`](perf-tests/GLOSSARY.md)，决策见 `perf-tests/docs/adr/`。
 - **双端 UI E2E 不在此处**：桌面脚本点击 + USB 真机（adb 反向端口 + WebView CDP 触摸/断言）的端到端套件住应用仓 `wasmnest-apps/e2e/dual/`（入口 `node scripts/e2e-dual.mjs --app bedcode`，说明见其 `docs/E2E.md` §10）。本仓不加设备依赖：默认 `cargo test` 必须在无真机 / 无 GUI 的机器上可跑，设备套件是 nightly / 发布前的另一层回归。
 - **跨仓路径铁律**：测试工程的能力仓依赖**必须**经同级兄弟目录 `../wasmnest-lib/<crate>`——平台双端宿主的 path 依赖写死 `../../../wasmnest-lib/<crate>`，指到同一物理路径才能保证能力 crate 只有一份（类型同一性）；平台仓不再挂 `packages/` submodule。能力仓根经 `tests/common/repo_paths.rs::lib_root()` 解析（`WASMNEST_LIB_ROOT` 可覆盖，fail-visible），平台仓根经 `platform_root()`，应用仓经 `tests/common/app_paths.rs`；perf-tests 用同一套 resolver 语义（`src/support/repo_paths.rs`）。
@@ -26,6 +26,7 @@
 
 - 不提交产物：`target/`、临时日志不入库（.gitignore 已覆盖）。
 - **Rust 编写 / 审核（强制 skill）**：任何 Rust 代码（`cross-end-tests/` 的锁与 `desktop-harness`、`perf-tests/` 的 harness）的**编写与审核**，动手前与完成审核时**必须**显式加载并遵循 `/skill:rust-best-practices`（skill 落点 `~/.agents/skills/rust-best-practices/SKILL.md`）；未加载即开始写或评审 = 流程违规，视为未完成交付 / 无效评审。该 skill 是通用惯用法与 API 设计判据层（与 `docs/public/` 通用规范同级），与本仓硬约束（本文件 §2 / public/testing.md 锁纪律 / 跨仓路径铁律）冲突时**以硬约束为准**；其自带的自检命令（fmt / clippy）不替代本仓测试与锁门禁。
+- **git worktree 的 target 共享桶（硬规范，四仓统一，见 `../wasmnest/docs/public/git.md` §8）**：本仓在 worktree 里跑 `cross-end-tests` / `perf-tests` 同样会各长一套 target。**新建 / 启用 worktree 后先做这一步再构建**：在平台仓根跑 `pnpm run target:worktrees`（= `wasmnest/scripts/worktree-shared-target.mjs`）——它把该 worktree 的 `cross-end-tests/target`、`target/perf` 等落点软链到 `<容器根>/target-shared/wasmnest-test/…`。脚本幂等、构建中的 worktree 自动跳过（勿在活构建里换链）；已有实体目录用 `--migrate`；清理删共享桶内容（删 worktree 里的 `target` 只删链接、不省空间）。
 - 测试数据走临时目录，禁止污染真实数据 / 日志目录。
 - 锁纪律：不得删锁 / 缩 glob / 恒真断言；锁清单过期同批更新（Seam 3，public/testing.md §4）。
 - 性能纪律（perf-tests）：只采 release 数字（入口拒绝 debug）；apps 模块要求先构建随包应用产物，缺失 fail-visible；应用数据写入临时 `HOME` 沙箱，退出恢复；数量级门禁是交付面的一部分——不得删测点 / 放宽门限 / 把断言改成恒真，数字变化需在交付说明点名。

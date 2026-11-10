@@ -17,7 +17,7 @@ publish = false
 # （实测 7GiB+，且把开发盘推到 92% 满）；共享后 harness bin 落在
 # `wasmnest-test/target/debug/wasmnest-crossend-desktop-harness`，
 # `cargo test` 一条命令建 + 跑两端（spec：.scratch/2026-10-15-cross-end-two-process/spec.md）
-members = [".", "desktop-harness"]
+members = [".", "desktop-harness", "relay-transport"]
 
 [lib]
 # 空 lib：让 `cargo build` 有目标可建（内容只有 crate 级说明）
