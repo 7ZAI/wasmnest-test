@@ -1,0 +1,51 @@
+[package]
+name = "wasmnest-crossend-desktop-harness"
+# 独立 leaf crate：两进程跨端 rig 的桌面进程（spec：.scratch/2026-10-15-cross-end-two-process/spec.md）
+# 依赖图只含桌面 lib + server-* crates——**不含移动 lib**（编译期保证移动模块不可能进本进程，
+# 与同包 bin 的惰性链接脆弱事实划清：见 spec §2.1）
+version = "0.0.1"
+license = "MIT"
+edition = "2021"
+publish = false
+
+[lib]
+name = "desktop_harness"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wasmnest-crossend-desktop-harness"
+path = "src/main.rs"
+
+[dependencies]
+# 依赖键 = lib name（与本仓 cross-end-tests 包同口径；L0 改名的直接收益）
+wasmnest-desktop-lib = { package = "wasmnest-desktop-runtime", path = "../../../wasmnest/wasmnest-desktop/src-tauri" }
+# WS 端点表 + 连接认证态观测（只读：给「移动端首帧认证已被桌面端接受」无竞态判据）
+wasmnest-server-websocket = { package = "wasmnest-server-websocket", path = "../../../wasmnest-lib/wasmnest-server-websocket" }
+# headless 链路加密装配 + 加密计数器快照（http_proxy 场景用；本阶段先留口）
+wasmnest-server-core = { package = "wasmnest-server-core", path = "../../../wasmnest-lib/wasmnest-server-core" }
+# mDNS 自播面（mdns_health 场景用；本阶段先留口）
+wasmnest-discovery-engine = { package = "wasmnest-discovery-engine", path = "../../../wasmnest-lib/wasmnest-discovery-engine" }
+# 装配守卫（inventory collected 对表，fail-visible）
+wasmnest-host-kit = { path = "../../../wasmnest-lib/wasmnest-host-kit" }
+serde_json = "1"
+# tokio：进程 stdin/stdout 控制面 + 服务器任务（与两端/rig 同版本）
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "process"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# actix-web：仅取 `dev::ServerHandle` 类型标注（与桌面端同版本 → 类型同一性成立）
+actix-web = "4"
+
+# ==================== 编译资源（对齐两端，避免 wasmtime/actix 编译期 OOM） ====================
+# 与本仓 cross-end-tests / 两端同款：路径依赖的 profile 只认本包根，不写则退回 cargo 默认
+# （全量调试信息 + 无 line-tables 优化），编译峰值内存显著更高。取值理由见根
+# `.cargo/config.toml` 与两端 `Cargo.toml` 注释。
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+split-debuginfo = "packed"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test.package.wasmtime]
+debug-assertions = false

@@ -1,0 +1,36 @@
+name: 门禁 / 夹具 / 覆盖
+description: 新增或重建互连测试、夹具、锁标定、CI 类任务。必填：需求 / 涉及链路 / 验收条件。
+title: "[feat] "
+labels: ["kind:feature"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 需求描述
+      description: 要覆盖哪条跨端链路 / 哪个门禁缺口 / 哪个 #[ignore] 场景要复活
+    validations:
+      required: true
+  - type: textarea
+    id: chain
+    attributes:
+      label: 涉及链路与仓
+      description: 端到端路径（如 桌面 PTY → 移动渲染）；涉及平台 / 能力 / 应用哪些仓
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: 实现要点
+      description: fixture 形态（两进程?）、CI 编排方式、契约版本对齐；暂缺写「待补」
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 可验证的完成标准：目标测试从 #[ignore] 到实跑全绿 / 锁命令
+    validations:
+      required: true
+  - type: textarea
+    id: related
+    attributes:
+      label: 相关锁与 issue
+      description: 涉及的能力仓锁 / 平台仓锁 / 相关 issue（owner/repo#n）

@@ -1,0 +1,6 @@
+# 性能工程的独立 target 桶：与 cross-end-tests 的 dev/test 构建集分开，
+# 避免 release 测量与正确性测试互相触发重编。父目录 .cargo/config.toml 的
+# jobs / sccache 设置仍会合并生效。
+[build]
+target-dir = "../target/perf"
+jobs = 4

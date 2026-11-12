@@ -1,0 +1,69 @@
+[package]
+name = "wasmnest-perf-tests"
+# 性能测试工程：平台桥接（迁移自平台仓 wasm_bridge_bench）+ 真实应用。
+# 与 cross-end-tests 平级、独立 workspace：release 测量与正确性测试的构建集分开。
+version = "0.0.1"
+license = "MIT"
+edition = "2021"
+publish = false
+
+[workspace]
+members = ["."]
+
+[lib]
+name = "perf_tests"
+path = "src/lib.rs"
+
+[[bin]]
+name = "perf-harness"
+path = "src/bin/perf-harness.rs"
+
+[dependencies]
+# 平台宿主（生产同形装配面）。能力 crate 经 sibling 路径进图，保证与平台仓
+# 构建同源、依赖图中只有一份（类型同一性）。
+wasmnest-desktop-lib = { package = "wasmnest-desktop-runtime", path = "../../wasmnest/wasmnest-desktop/src-tauri" }
+# 无头运行时装配面（真实 app 的 instantiate/activate 细粒度测点用）
+wasmnest-wasm-core = { path = "../../wasmnest-lib/wasmnest-wasm-core", default-features = false, features = ["test-support"] }
+# ABI 形态常量（patch 指回工作树 SDK，见文末 [patch.crates-io]）
+wasmnest-plugin-api = "0.0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 系统事实与进程 RSS（与平台同版本，避免解析出两份）
+sysinfo = "0.33"
+sha2 = "0.10"
+
+# ==================== 编译资源（对齐平台 / 跨端测试） ====================
+# 路径依赖的 profile 只认本包根；取值理由见跨端测试 Cargo.toml 与平台仓注释。
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+split-debuginfo = "packed"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# 性能测量只认 release；profile 对齐产品发布物，测到的才是用户拿到的东西。
+[profile.release]
+panic = "unwind"
+codegen-units = 16
+lto = "thin"
+opt-level = "s"
+strip = true
+
+[profile.test.package.wasmtime]
+debug-assertions = false
+
+# ==================== [patch] 本地 SDK 指回 ====================
+# 桌面宿主随包插件走 `desktop-assembly`，会声明已发布的 wasmnest-plugin-api；
+# patch 指回工作树，避免解析出 crates.io 的第二份 SDK（类型同一性）。
+# 注：此处 `packages/` 是**已发布插件 SDK 的在位路径**（平台仓删除的是根 `packages/`
+# submodule 挂载点，能力 crate 已迁 `../wasmnest-lib`；SDK 不属能力 crate、仍在原位）。
+# 全仓仅剩 cross-end-tests / perf-tests 两处该引用——SDK 若搬迁，两处必须同批改，
+# 否则两种构建模式都会在依赖解析期直接红。
+[patch.crates-io]
+wasmnest-plugin-api = { path = "../../wasmnest/wasmnest-desktop/packages/plugin-sdk-desktop/rust" }
