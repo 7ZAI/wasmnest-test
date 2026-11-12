@@ -52,6 +52,10 @@ pub struct ActivationRecord {
     pub millis: f64,
     pub ok: bool,
     pub error: Option<String>,
+    /// 该应用激活完成时的整进程 RSS（0 = 未读到 / 激活失败）。
+    /// 顺序激活的差值就是单应用常驻增量（首个应用含 wasmtime 引擎与组件
+    /// 缓存的首次初始化，会被高估——报告里显式标注）。
+    pub rss_bytes: u64,
 }
 
 pub struct AppsEnv {
@@ -61,6 +65,9 @@ pub struct AppsEnv {
     pub activation: Vec<ActivationRecord>,
     /// 沙箱安装前的 RSS（内存增量基准）
     pub rss_before_bytes: u64,
+    /// 扫描 / 实例化完成、激活开始前的 RSS（逐应用激活增量的基准；
+    /// 用装配前基准会把四份组件实例化全算到第一个应用头上）
+    pub rss_before_activation_bytes: u64,
     /// 工作目录（BedCode 配置、文件传输快照的形态来源）
     pub workspace: PathBuf,
     temp_root: PathBuf,
@@ -151,6 +158,7 @@ pub async fn build() -> anyhow::Result<AppsEnv> {
     seed_fs_grant(&assembled.db, sandbox.root()).await?;
     seed_agent_hub_skill(sandbox.root())?;
 
+    let rss_before_activation_bytes = crate::support::rss::current_rss_bytes().unwrap_or(0);
     let activation = activate_all(&host).await;
 
     // 会话数据必须在激活之后写入：ai-chatbox 的数据根在 activate 期才解析并缓存
@@ -172,6 +180,7 @@ pub async fn build() -> anyhow::Result<AppsEnv> {
             .collect(),
         activation,
         rss_before_bytes,
+        rss_before_activation_bytes,
         workspace,
         temp_root,
         _sandbox: sandbox,
@@ -258,6 +267,7 @@ async fn activate_all(host: &Arc<PluginHost>) -> Vec<ActivationRecord> {
         let millis = t0.elapsed().as_secs_f64() * 1e3;
         match result {
             Ok(()) => {
+                let rss_bytes = crate::support::rss::current_rss_bytes().unwrap_or(0);
                 println!("[apps] 已激活 {label}（{millis:.0} ms）");
                 records.push(ActivationRecord {
                     id,
@@ -265,6 +275,7 @@ async fn activate_all(host: &Arc<PluginHost>) -> Vec<ActivationRecord> {
                     millis,
                     ok: true,
                     error: None,
+                    rss_bytes,
                 });
             }
             Err(e) => {
@@ -276,6 +287,7 @@ async fn activate_all(host: &Arc<PluginHost>) -> Vec<ActivationRecord> {
                     millis,
                     ok: false,
                     error: Some(error),
+                    rss_bytes: 0,
                 });
             }
         }

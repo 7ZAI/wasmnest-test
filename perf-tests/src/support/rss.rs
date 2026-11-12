@@ -36,6 +36,17 @@ fn sysinfo_rss() -> Option<u64> {
         .map(|p| p.memory())
 }
 
+/// 系统可用内存（字节）。
+///
+/// 用于容量估算（「本机还能塞多少个应用」），不是本进程指标；与 `VmRSS` 不同源，
+/// 不要混入常驻/峰值口径。
+pub fn available_memory_bytes() -> Option<u64> {
+    use sysinfo::System;
+    let mut sys = System::new();
+    sys.refresh_memory();
+    Some(sys.available_memory())
+}
+
 /// 人读格式（MiB，一位小数）。
 pub fn mib(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)

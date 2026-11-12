@@ -29,6 +29,37 @@ fn main() -> ExitCode {
     let json_out = arg_optional_value(&args, "--json").unwrap_or_else(default_json_path);
     let baseline = arg_value(&args, "--compare");
     let list_only = args.iter().any(|a| a == "--list");
+    // 加压探针的边界：默认值写进报告（见 ScaleLimits），不把默认当成结论。
+    let limits = boundary::ScaleLimits {
+        max_apps: arg_value(&args, "--max-apps")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(boundary::DEFAULT_MAX_APPS),
+        rss_ceiling_mib: arg_value(&args, "--rss-ceiling-mib")
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(boundary::DEFAULT_RSS_CEILING_MIB),
+    };
+
+    // S4 子进程模式：父进程每档拉一个干净进程（见 boundary::capacity_probe_child）。
+    // 必须先于模块选择与 debug 拒绝：子进程由父进程自己拉起，构建档位与父一致。
+    if let Some(n) = arg_value(&args, "--capacity-probe").and_then(|v| v.parse::<usize>().ok()) {
+        let rt = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("[perf] tokio runtime 构建失败: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        return match rt.block_on(boundary::capacity_probe_child(n)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("[perf] capacity probe {n} 失败: {e:#}");
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     let modules = Modules::parse(&module_filter);
     if let Err(msg) = modules {
@@ -74,6 +105,12 @@ fn main() -> ExitCode {
         "[perf] 模式：{}（每测点 {iters} 次，模块 {module_filter}）",
         if full { "full" } else { "smoke" }
     );
+    if modules.boundary {
+        println!(
+            "[perf] S4 加压探针：上限 {} 个 / RSS 上限 {:.0} MiB",
+            limits.max_apps, limits.rss_ceiling_mib
+        );
+    }
 
     let mut report = Report::new(if full { "full" } else { "smoke" }, iters);
     report.set_env(environment.describe());
@@ -97,7 +134,13 @@ fn main() -> ExitCode {
         }
     }
     if modules.boundary {
-        if let Err(e) = rt.block_on(boundary::run(full, iters, group_filter.as_deref(), &mut report)) {
+        if let Err(e) = rt.block_on(boundary::run(
+            full,
+            iters,
+            group_filter.as_deref(),
+            &limits,
+            &mut report,
+        )) {
             eprintln!("[perf] boundary 模块失败: {e:#}");
             report.failures.push(format!("boundary: {e:#}"));
         }

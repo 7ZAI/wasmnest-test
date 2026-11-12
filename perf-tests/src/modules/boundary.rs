@@ -5,15 +5,21 @@
 //!
 //! - **S 宿主规模**：同一 wasm 组件摆成 N 个属主，逐个真激活。记录每个数量档的
 //!   激活耗时、常驻 RSS、跨实例命令延迟，以及停用后的回收情况。宿主编排层没有
-//!   「最多 N 个应用」的硬编码常量——真实上限由内存 / 调度决定，故这里用
-//!   **容量探针**（full 跑 4/8/16/32）测出本次环境的最大同时常驻数；16 个是
-//!   交付门禁的支撑下限，32 个是只观察、不设门禁的探针。
+//!   「最多 N 个应用」的硬编码常量——真实上限由内存 / 调度决定：
+//!   - S1 是**固定档探针**（full 跑 4/8/16/32），画规模曲线；16 个是交付门禁的
+//!     支撑下限，32 个只观察；
+//!   - S4 是**加压探针**：从 4 起翻倍加压，直到某一档不可用（装配 / 激活失败、
+//!     RSS 超上限、单命令延迟超响应上限），再二分收敛，直接回答「本次环境最多
+//!     同时跑多少个」并给出边界归因。上限可经 `--max-apps` 调高。
+//!   S1/S4 的被测物都是**合成夹具**（同一 bench 组件多属主）：测的是宿主 wasm
+//!   实例容量，不是真实业务应用的内存画像——真实应用的常驻增量与按内存估算
+//!   的容量见 apps 模块 R1。
 //! - **F 前端投影**：`plugin_list_loaded` 返回的注册表清单（`list_plugins`）在
 //!   N = 4/16/64/256 个插件时的取数耗时与 JSON 体积。这是宿主 → 前端边界的
 //!   **数据面**；真实 WebView 的渲染 / 派发由平台 e2e 覆盖，不在无头进程里假装。
 //!
 //! 两个子环境都走生产同形装配与临时目录；N 个 wasm 实例使用 bench 夹具，
-//! N 个清单使用 TS-only 目录（不实例化 wasm），把「运行时实例」与「清单体积」
+//! N 个清单使用 frontend 形态目录（不实例化 wasm），把「运行时实例」与「清单体积」
 //! 两个变量隔开。
 
 use std::time::Instant;
@@ -28,10 +34,35 @@ use crate::support::scale_env::{self, ScaleEnv};
 
 /// 交付门禁支持的同时常驻应用数（当前随包 4 个应用的 4 倍余量）
 const SUPPORTED_SCALE: usize = 16;
-/// full 模式的容量探针上限（观察值，不设门禁）
+/// S1 固定档探针上限（观察值，不设门禁）
 const SCALE_PROBE_LIMIT: usize = 32;
 /// 注册表投影 full 模式的上限
 const MANIFEST_PROBE_LIMIT: usize = 256;
+/// S4 加压探针的默认上限（`--max-apps` 覆盖）
+pub const DEFAULT_MAX_APPS: usize = 256;
+/// S4 默认的整进程 RSS 上限（MiB；`--rss-ceiling-mib` 覆盖）
+pub const DEFAULT_RSS_CEILING_MIB: f64 = 4096.0;
+/// Rust 层的「卡顿」代理：N 个常驻下单命令中位数上限（µs）。
+/// 前端帧率不在无头进程里测，这里只保证命令面没有被调度拖垮。
+const RESPONSIVE_PING_US: f64 = 10_000.0;
+
+/// 规模探针的可调边界（CLI 注入；同时写进报告，避免「默认值当成结论」）。
+#[derive(Debug, Clone, Copy)]
+pub struct ScaleLimits {
+    /// 加压上限（个）
+    pub max_apps: usize,
+    /// 整进程 RSS 上限（MiB）
+    pub rss_ceiling_mib: f64,
+}
+
+impl Default for ScaleLimits {
+    fn default() -> Self {
+        Self {
+            max_apps: DEFAULT_MAX_APPS,
+            rss_ceiling_mib: DEFAULT_RSS_CEILING_MIB,
+        }
+    }
+}
 
 struct Scenario {
     id: &'static str,
@@ -45,6 +76,7 @@ fn all() -> Vec<Scenario> {
         Scenario { id: "S1", group: "S", title: "同时常驻规模（4/8/16/32）", smoke: true },
         Scenario { id: "S2", group: "S", title: "N 实例并发命令扇出", smoke: false },
         Scenario { id: "S3", group: "S", title: "N 实例停用与 RSS 回收", smoke: false },
+        Scenario { id: "S4", group: "S", title: "最大同时常驻（加压到边界）", smoke: false },
         Scenario { id: "F1", group: "F", title: "宿主→前端注册表投影（4/16/64/256）", smoke: true },
     ]
 }
@@ -61,21 +93,31 @@ pub async fn run(
     full: bool,
     iters: usize,
     group_filter: Option<&str>,
+    limits: &ScaleLimits,
     rep: &mut Report,
 ) -> anyhow::Result<()> {
     let selected = |id: &str, group: &str| match group_filter {
         None => true,
         Some(g) => group.eq_ignore_ascii_case(g) || id.contains(g),
     };
-    // 冒烟只跑每个子模块的一条主链；S2/S3 只在 --full 下出现。
-    let enabled = |id: &str| full || all().iter().any(|s| s.id == id && s.smoke);
+    // 冒烟只跑每个子模块的一条主链；S2/S3/S4 只在 --full 下出现。
+    // 例外：`--group S4` 这种**精确点名**允许在冒烟模式单跑——只想量上限时
+    // 不必把整份矩阵跑一遍（门禁仍只在 --full 下生效）。
+    let named = |id: &str| group_filter.is_some_and(|g| id.eq_ignore_ascii_case(g));
+    let enabled = |id: &str| {
+        full || named(id) || all().iter().any(|s| s.id == id && s.smoke)
+    };
     let do_s1 = enabled("S1") && selected("S1", "S");
     let do_s2 = enabled("S2") && selected("S2", "S");
     let do_s3 = enabled("S3") && selected("S3", "S");
+    let do_s4 = enabled("S4") && selected("S4", "S");
     let do_f1 = enabled("F1") && selected("F1", "F");
 
     if do_s1 || do_s2 || do_s3 {
         run_scale(full, iters, do_s1, do_s2, do_s3, rep).await?;
+    }
+    if do_s4 {
+        run_capacity(full, limits, rep).await?;
     }
     if do_f1 {
         run_projection(full, rep).await?;
@@ -437,6 +479,408 @@ async fn run_fanout(
         "个",
         Cmp::Less,
     );
+    Ok(())
+}
+
+// ==================== S4 · 加压到边界 ====================
+
+/// 子进程回传探针结果时 stdout 的标记行前缀（父进程按行扫描，日志前缀无影响）
+pub const CAPACITY_PROBE_MARKER: &str = "WASMNEST_PERF_CAPACITY ";
+
+/// 一档加压探针的结果
+#[derive(Debug, Clone)]
+struct CapacityStep {
+    /// 不可用时的精确档位（激活失败记「第几个实例」，其余记尝试档位）
+    apps: usize,
+    /// 本档是否可用（装配成功 + 全部激活 + 回执正常 + RSS / 延迟在限内）
+    usable: bool,
+    /// 边界归因（`ok` / `assemble-failed` / `activation-failed` / `ping-failed`
+    /// / `rss-ceiling` / `latency` / `probe-crashed`）
+    reason: &'static str,
+    /// 人读证据（失败原因或档位说明）
+    detail: String,
+    rss_mib: Option<f64>,
+    rss_before_mib: Option<f64>,
+}
+
+/// 子进程单档探针的原始回执
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ChildProbe {
+    apps: usize,
+    rss_before_mib: Option<f64>,
+    rss_mib: Option<f64>,
+    activated: usize,
+    activate_ms: f64,
+    #[serde(default)]
+    ping_us: Vec<f64>,
+    assemble_failure: Option<String>,
+    activation_failure: Option<String>,
+    /// 激活失败时是「第几个实例」（容量结论要精确序号）
+    failed_at: Option<usize>,
+    ping_failure: Option<String>,
+}
+
+/// 加压探针：从 4 起翻倍，直到某档不可用，再在区间内二分收敛。
+///
+/// 每档在**独立子进程**里装配并测量，理由见 [`capacity_probe_child`]：进程内
+/// 连续装配多档时，宿主与 message bus 互相持有（`Arc` 环），停用后的实例不会
+/// 释放，RSS 逐档叠加，容量判定会系统性偏小。子进程让每档都是「N 个应用同时
+/// 常驻」的干净整进程口径，也顺带隔离高档位的 trap / OOM。
+async fn run_capacity(full: bool, limits: &ScaleLimits, rep: &mut Report) -> anyhow::Result<()> {
+    let ceiling = limits.max_apps.max(4);
+
+    let mut last_good = 0usize;
+    let mut last_good_rss: Option<(f64, f64)> = None;
+    let mut first_bad: Option<CapacityStep> = None;
+
+    let mut n = 4usize;
+    while n <= ceiling {
+        let step = probe_capacity_level(n, limits, rep).await?;
+        if step.usable {
+            last_good = n;
+            last_good_rss = rss_pair(&step);
+            n = n.saturating_mul(2);
+        } else {
+            first_bad = Some(step);
+            break;
+        }
+    }
+
+    // 翻倍只给到 [可用, 不可用] 区间；二分把它收敛到相邻整数。前提是「档位越大
+    // 越差」（RSS 与激活成本单调；命令延迟有抖动）——因此每档实测都进报告，
+    // 归因取**首个不可用档**的实测原因，而不是二分的推断。
+    if let Some(mut bad) = first_bad.clone() {
+        // `bad.apps > last_good + 1` 而不是相减：激活失败记的是精确序号，
+        // 单调性被抖动打破时也不能让 usize 下溢。
+        while bad.apps > last_good + 1 {
+            let mid = last_good + (bad.apps - last_good) / 2;
+            let step = probe_capacity_level(mid, limits, rep).await?;
+            if step.usable {
+                last_good = mid;
+                last_good_rss = rss_pair(&step);
+            } else {
+                bad = step;
+            }
+        }
+        first_bad = Some(bad);
+    }
+
+    let bound = first_bad
+        .as_ref()
+        .map(|s| s.reason)
+        .unwrap_or("probe-limit");
+    let bound_label = match bound {
+        "probe-limit" => "达到本次加压上限（未触底，可 --max-apps 调高）",
+        "assemble-failed" => "装配期实例化失败（扫描即实例化）",
+        "activation-failed" => "激活失败",
+        "ping-failed" => "命令回执失败",
+        "rss-ceiling" => "整进程 RSS 超过上限",
+        "latency" => "单命令中位数超过响应上限",
+        "probe-crashed" => "探针子进程异常退出（trap / OOM / 崩溃）",
+        _ => "未归因",
+    };
+    let mut note = format!(
+        "边界归因：{bound_label}；加压上限 {ceiling} 个，RSS 上限 {:.0} MiB",
+        limits.rss_ceiling_mib
+    );
+    if let Some(bad) = &first_bad {
+        note.push_str(&format!("；首个不可用档 {} 个（{}）", bad.apps, bad.detail));
+    }
+    rep.record(
+        "S4.max-apps",
+        "S 宿主规模",
+        "最大同时常驻（可用）",
+        "个",
+        vec![last_good as f64],
+        &note,
+    );
+    if let Some(bad) = &first_bad {
+        rep.record(
+            "S4.first-bad",
+            "S 宿主规模",
+            "首个不可用档",
+            "个",
+            vec![bad.apps as f64],
+            &bad.detail,
+        );
+    }
+    // 单应用边际内存：给「本机还能塞多少」一个实测锚点（合成夹具口径）。
+    if last_good > 0 {
+        if let Some((rss_mib, rss_before_mib)) = last_good_rss {
+            rep.record(
+                "S4.rss-per-app",
+                "S 宿主规模",
+                "单应用边际常驻内存",
+                "MiB",
+                vec![(rss_mib - rss_before_mib) / last_good as f64],
+                "（最大可用档 RSS − 同进程装配前 RSS）/ N；合成夹具，真实应用见 R1",
+            );
+        }
+    }
+
+    if full {
+        // 与 S1 同一支撑下限：门禁只保「下限能跑」，上限本身是探针结果不是回归线。
+        rep.budget(
+            "S4.max-apps",
+            "最大同时常驻不低于支撑下限 16",
+            last_good as f64,
+            (SUPPORTED_SCALE as f64) - 0.5,
+            "个",
+            Cmp::Greater,
+        );
+    }
+    Ok(())
+}
+
+fn rss_pair(step: &CapacityStep) -> Option<(f64, f64)> {
+    Some((step.rss_mib?, step.rss_before_mib?))
+}
+
+/// 拉一个子进程测一档，并把结果落成测点。
+async fn probe_capacity_level(
+    n: usize,
+    limits: &ScaleLimits,
+    rep: &mut Report,
+) -> anyhow::Result<CapacityStep> {
+    const GROUP: &str = "S 宿主规模";
+    let probe = match spawn_capacity_child(n) {
+        Ok(probe) => probe,
+        Err(error) => {
+            let detail = format!("探针子进程异常：{error:#}");
+            eprintln!("[boundary] S4 {n} 档{detail}");
+            rep.record(
+                &format!("S4.step-{n}.crashed"),
+                GROUP,
+                &format!("{n} 档探针子进程"),
+                "个",
+                vec![n as f64],
+                &detail,
+            );
+            return Ok(CapacityStep {
+                apps: n,
+                usable: false,
+                reason: "probe-crashed",
+                detail,
+                rss_mib: None,
+                rss_before_mib: None,
+            });
+        }
+    };
+
+    let (usable, reason, detail) = verdict_from_probe(&probe, limits);
+
+    rep.record(
+        &format!("S4.step-{n}.activated"),
+        GROUP,
+        &format!("{n} 档实际 activated"),
+        "个",
+        vec![probe.activated as f64],
+        "独立子进程装配（不从上一档继承）",
+    );
+    rep.record(
+        &format!("S4.step-{n}.activate-ms"),
+        GROUP,
+        &format!("{n} 档顺序激活总耗时"),
+        "ms",
+        vec![probe.activate_ms],
+        "装配期实例化不计入",
+    );
+    if let Some(rss_mib) = probe.rss_mib {
+        rep.record(
+            &format!("S4.step-{n}.rss"),
+            GROUP,
+            &format!("{n} 档常驻 RSS"),
+            "MiB",
+            vec![rss_mib],
+            &format!("子进程整进程 RSS；上限 {:.0} MiB", limits.rss_ceiling_mib),
+        );
+    }
+    if !probe.ping_us.is_empty() {
+        let note = if usable {
+            "全部回执正常，延迟在响应上限内".to_string()
+        } else {
+            detail.clone()
+        };
+        rep.record(
+            &format!("S4.step-{n}.ping"),
+            GROUP,
+            &format!("{n} 档单命令"),
+            "µs",
+            probe.ping_us.clone(),
+            &note,
+        );
+    }
+
+    Ok(CapacityStep {
+        apps: probe.failed_at.unwrap_or(probe.apps),
+        usable,
+        reason,
+        detail,
+        rss_mib: probe.rss_mib,
+        rss_before_mib: probe.rss_before_mib,
+    })
+}
+
+/// 判定顺序：能不能跑（装配 / 激活 / 回执）→ 内存 → 响应。先报「跑不起来」，
+/// 再报「跑得慢」，避免把激活失败误读成性能退化。
+fn verdict_from_probe(probe: &ChildProbe, limits: &ScaleLimits) -> (bool, &'static str, String) {
+    if let Some(detail) = &probe.assemble_failure {
+        return (false, "assemble-failed", detail.clone());
+    }
+    if let Some(detail) = &probe.activation_failure {
+        return (false, "activation-failed", detail.clone());
+    }
+    if let Some(detail) = &probe.ping_failure {
+        return (false, "ping-failed", detail.clone());
+    }
+    if let Some(rss_mib) = probe.rss_mib {
+        if rss_mib > limits.rss_ceiling_mib {
+            return (
+                false,
+                "rss-ceiling",
+                format!(
+                    "整进程 RSS {rss_mib:.1} MiB > 上限 {:.1} MiB",
+                    limits.rss_ceiling_mib
+                ),
+            );
+        }
+    }
+    let ping_median = median(&probe.ping_us);
+    if ping_median.is_finite() && ping_median > RESPONSIVE_PING_US {
+        return (
+            false,
+            "latency",
+            format!("单命令中位数 {ping_median:.1} µs > 响应上限 {RESPONSIVE_PING_US:.0} µs"),
+        );
+    }
+    (true, "ok", String::new())
+}
+
+/// 父进程侧：起一个 `--capacity-probe <n>` 子进程并解析标记行。
+fn spawn_capacity_child(n: usize) -> anyhow::Result<ChildProbe> {
+    let exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("取当前可执行文件失败: {e}"))?;
+    let mut command = std::process::Command::new(exe);
+    command.arg("--capacity-probe").arg(n.to_string());
+    // 子进程与父进程同一构建；debug 构建由父进程的 --allow-debug 放行过
+    if cfg!(debug_assertions) {
+        command.arg("--allow-debug");
+    }
+    let output = command
+        .output()
+        .map_err(|e| anyhow::anyhow!("启动探针子进程失败: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(CAPACITY_PROBE_MARKER))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "未回传结果（exit={:?}）：{}",
+                output.status.code(),
+                tail(&String::from_utf8_lossy(&output.stderr), 800)
+            )
+        })?;
+    let probe: ChildProbe = serde_json::from_str(line)
+        .map_err(|e| anyhow::anyhow!("探针回执解析失败: {e}；原始行 {line}"))?;
+    anyhow::ensure!(probe.apps == n, "探针回执档位不符: {} != {n}", probe.apps);
+    Ok(probe)
+}
+
+fn tail(text: &str, chars: usize) -> String {
+    let count = text.chars().count();
+    text.chars().skip(count.saturating_sub(chars)).collect()
+}
+
+/// 子进程口径的单档探针（`--capacity-probe <N>`）：装配 → 全激活 → 全量 ping，
+/// 把结果写成标记行到 stdout 后退出。
+///
+/// 为什么每档一个进程：`init_message_bus` 把 `Arc<PluginHost>` 的克隆装进
+/// message bus 的 dispatcher 槽，host ↔ bus 成环，进程内停用后的宿主不会被
+/// 释放（实测同一档位第二轮 RSS 比第一轮高几十 MiB）。连续装配多档会让上一档
+/// 的实例驻留，容量判定系统性偏小；子进程把每档还原成「N 个应用同时常驻」的
+/// 干净整进程口径。
+pub async fn capacity_probe_child(n: usize) -> anyhow::Result<()> {
+    let rss_before_mib = rss::current_rss_bytes().map(rss::mib);
+
+    let payload = match scale_env::build_wasm_instances(n).await {
+        Err(error) => serde_json::json!({
+            "apps": n,
+            "rss_before_mib": rss_before_mib,
+            "rss_mib": serde_json::Value::Null,
+            "activated": 0,
+            "activate_ms": 0.0,
+            "ping_us": Vec::<f64>::new(),
+            "assemble_failure": format!("{error:#}"),
+            "activation_failure": serde_json::Value::Null,
+            "failed_at": serde_json::Value::Null,
+            "ping_failure": serde_json::Value::Null,
+        }),
+        Ok(env) => {
+            let mut active: Vec<String> = Vec::with_capacity(n);
+            let mut activate_ms = 0.0;
+            let mut activation_failure: Option<String> = None;
+            let mut failed_at: Option<usize> = None;
+            for id in &env.ids {
+                let started = Instant::now();
+                match env.host.activate_plugin(id, false).await {
+                    Ok(()) => {
+                        activate_ms += micros(started.elapsed()) / 1000.0;
+                        active.push(id.clone());
+                    }
+                    Err(error) => {
+                        failed_at = Some(active.len() + 1);
+                        activation_failure = Some(format!(
+                            "第 {} 个实例激活失败：{error:#}",
+                            active.len() + 1
+                        ));
+                        break;
+                    }
+                }
+            }
+
+            let rss_mib = rss::current_rss_bytes().map(rss::mib);
+            let mut ping_us = Vec::with_capacity(active.len());
+            let mut ping_failure: Option<String> = None;
+            if activation_failure.is_none() {
+                for id in &active {
+                    let started = Instant::now();
+                    match env.host.invoke_rust_command(id, "bench.ping", json!({})).await {
+                        Ok(value)
+                            if value.get("pong").and_then(|v| v.as_bool()) == Some(true) =>
+                        {
+                            ping_us.push(micros(started.elapsed()));
+                        }
+                        Ok(value) => {
+                            ping_failure = Some(format!("{id} 回执异常：{value}"));
+                            break;
+                        }
+                        Err(error) => {
+                            ping_failure = Some(format!("{id} 调用失败：{error:#}"));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let payload = serde_json::json!({
+                "apps": n,
+                "rss_before_mib": rss_before_mib,
+                "rss_mib": rss_mib,
+                "activated": active.len(),
+                "activate_ms": activate_ms,
+                "ping_us": ping_us,
+                "assemble_failure": serde_json::Value::Null,
+                "activation_failure": activation_failure,
+                "failed_at": failed_at,
+                "ping_failure": ping_failure,
+            });
+            let _ = env.deactivate_all(&active).await;
+            env.cleanup();
+            payload
+        }
+    };
+
+    println!("{CAPACITY_PROBE_MARKER}{payload}");
     Ok(())
 }
 
