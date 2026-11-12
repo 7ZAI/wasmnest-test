@@ -510,14 +510,14 @@ fn wit_event_signatures(text: &str) -> BTreeMap<String, String> {
 #[test]
 fn desktop_events_interface_is_union_of_both_vocabularies() {
     let desktop_wit = platform_root()
-        .join("wasmnest-desktop/packages/plugin-sdk-desktop/rust/wit-src/cap-desktop.wit");
+        .join("wasmnest-desktop/packages/plugin-sdk-desktop/rust/wit-src/plugin-face.wit");
     let mobile_wit = platform_root()
-        .join("wasmnest-mobile/packages/plugin-sdk-mobile/rust/wit-src/cap-mobile.wit");
+        .join("wasmnest-mobile/packages/plugin-sdk-mobile/rust/wit-src/plugin-face.wit");
 
     let desktop =
-        wit_event_signatures(&fs::read_to_string(&desktop_wit).expect("读桌面 cap-desktop.wit"));
+        wit_event_signatures(&fs::read_to_string(&desktop_wit).expect("读桌面 plugin-face.wit"));
     let mobile =
-        wit_event_signatures(&fs::read_to_string(&mobile_wit).expect("读移动 cap-mobile.wit"));
+        wit_event_signatures(&fs::read_to_string(&mobile_wit).expect("读移动 plugin-face.wit"));
 
     assert!(
         !desktop.is_empty() && !mobile.is_empty(),
