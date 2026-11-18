@@ -301,6 +301,14 @@ jobs:
             WASMNEST_LIB_ROOT="$GITHUB_WORKSPACE/wasmnest-lib" \
             node scripts/link-platform-sdk.mjs --no-install
 
+      # 应用仓根依赖：根 scripts/lib/i18n-precompile.mjs 等构建期脚本 import 的
+      # @intlify/bundle-utils 等只在根 package.json 声明（各 app 是独立 workspace，
+      # 逐 app install 不会把根依赖带进 node_modules）。plugins:build 里 vite 解析根
+      # 脚本时缺包会直接红（ERR_MODULE_NOT_FOUND）。口径同应用仓 ci.yml「安装应用仓
+      # 根依赖」：先装根，再逐 app 装。
+      - name: 安装应用仓根依赖
+        run: pnpm --dir ../wasmnest-apps install --frozen-lockfile
+
       # 每个应用工程是独立 workspace，逐一安装（口径同平台仓 test.yml / 应用仓 ci.yml）。
       # link 后各 manifest 的 file: 指回同场路径，与仓内 lockfile 记录的 specifier
       # 一致（lockfile 在 SDK 发布前仍按 file: 解析），--frozen-lockfile 可用。
