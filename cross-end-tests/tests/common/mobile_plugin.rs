@@ -174,13 +174,17 @@ impl MobilePluginWorld {
     }
 
     /// 登记会话页面字节流（宿主窄转发表真表）——等同前端 `openTerminalStream`
-    pub fn page_subscribe(&self, session_id: &str, channel: Channel<InvokeResponseBody>) {
-        terminal_stream_gateway().page_subscribe(session_id, channel);
+    /// 返回本代页面令牌（注销时必须回传；重复订阅换发新令牌）
+    pub fn page_subscribe(&self, session_id: &str, channel: Channel<InvokeResponseBody>) -> u64 {
+        terminal_stream_gateway()
+            .page_subscribe(session_id, channel)
+            .expect("page_subscribe 必须成功（session id 非空 / 转发表未满）")
     }
 
-    /// 注销页面字节流（退出终端页）
-    pub fn page_unsubscribe(&self, session_id: &str) {
-        terminal_stream_gateway().page_unsubscribe(session_id);
+    /// 注销页面字节流（退出终端页）：只摘本代通道，令牌不匹配（旧代异步注销 /
+    /// 已换代 / 已被顶替）即 no-op
+    pub fn page_unsubscribe(&self, session_id: &str, page_token: u64) {
+        terminal_stream_gateway().page_unsubscribe(session_id, page_token);
     }
 
     /// 宿主窄转发计数（丢弃可观测：与页面收到的字节对账）

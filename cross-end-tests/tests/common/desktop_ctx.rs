@@ -212,12 +212,14 @@ pub async fn enable_link_crypto_http() {
     // `init_at_startup` 自身对身份失败只 error 日志 + 强制全关（fail-safe），
     // 因此这里必须核对快照真的开了，否则后续断言会在“全关但无报错”下假绿
     wasmnest_server_core::link_crypto::init_at_startup(link_crypto_dir(), guard.conn());
-    // 主开关：GUI 由用户在设置页写入 DB settings，rig 直接置运行期快照
-    // （其余子开关 / 明文回落策略取默认值 = 子通道全开 + 允许老客户端明文）
-    wasmnest_server_core::link_crypto::update_config(wasmnest_server_core::link_crypto::LinkCryptoConfig {
-        enabled: true,
-        ..Default::default()
-    });
+    // 主开关 → 应用策略（2026-11-04 用户裁决：策略属于应用，宿主无开关、不设下限）：
+    // 旧「enabled + 允许明文回落」的默认值等价于 `preferred`——对端支持就加密，
+    // 不支持就放行明文（永不拒绝）
+    wasmnest_server_core::link_crypto::set_app_policy(
+        SESSION_PLUGIN_ID,
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Preferred,
+    )
+    .expect("设置 bedcode 链路加密策略为 preferred");
     wasmnest_server_core::link_crypto::sync_registration();
     assert!(
         wasmnest_server_core::link_crypto::identity_parts().is_some(),
@@ -225,15 +227,22 @@ pub async fn enable_link_crypto_http() {
     );
 }
 
-/// 运行期开关：桌面端链路加密参与意愿（与宿主 `set_traffic_encryption_config` 同款，
-/// 差别是 rig 不落库——只改内存快照 + 同步过滤器注册）
+/// 运行期开关：桌面端链路加密参与意愿（策略属于应用，rig 直接写应用策略 + 同步过滤器注册，
+/// 不落库）
 ///
 /// 用它覆盖「两端开关不一致」这一格：移动端开着加密、桌面端关着时，桌面端必须
 /// **显性拒绝**协商过的请求，而不是把密文透给业务解析。
 pub fn set_link_crypto_enabled(enabled: bool) {
-    let mut config = wasmnest_server_core::link_crypto::current_config();
-    config.enabled = enabled;
-    wasmnest_server_core::link_crypto::update_config(config);
+    // 旧「主开关」即应用策略：开 = `preferred`（与旧默认同义），关 = `off`。
+    // 全部应用为 `off` 且无存量 WS 密文会话时，sync_registration 把过滤器摘出链——
+    // 正是中间件 fail-visible 分支显性拒绝带协商头请求的形态（P-006）。
+    let policy = if enabled {
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Preferred
+    } else {
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Off
+    };
+    wasmnest_server_core::link_crypto::set_app_policy(SESSION_PLUGIN_ID, policy)
+        .unwrap_or_else(|e| panic!("设置 bedcode 链路加密策略失败: {e}"));
     wasmnest_server_core::link_crypto::sync_registration();
 }
 

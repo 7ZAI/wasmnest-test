@@ -171,9 +171,10 @@ async fn scenario(port: u16, discovery: &MdnsDiscovery) {
     );
 
     // ==================== M-002 /api/health 探测（照抄前端 httpProbe 的请求构造） ====================
-    // 前端先声明目标（probe 发生在 ws_connect 之前，ConnectionManager 尚未设目标）
-    wasmnest_mobile_lib::commands::egress::egress_declare_desktop_target(desktop.address.clone(), desktop.port)
-        .expect("声明探测目标");
+    // 前端先声明目标（probe 发生在 ws_connect 之前，ConnectionManager 尚未设目标）。
+    // 命令面 `egress_declare_desktop_target` 只是凭证门 + 声明动作，rig 无宿主凭证，
+    // 按移动端宿主自身测试的口径直调声明动作（门与动作的拆分见其实现注释）
+    wasmnest_mobile_lib::egress::policy().add_desktop_target(&desktop.address, desktop.port);
 
     let probe = wasmnest_mobile_lib::commands::http_proxy::execute_proxy(
         wasmnest_mobile_lib::commands::http_proxy::HttpProxyRequest {
@@ -186,6 +187,7 @@ async fn scenario(port: u16, discovery: &MdnsDiscovery) {
             kind: Some("desktop".to_string()),
         },
         None,
+        &wasmnest_mobile_lib::commands::host_gate::CallerIdentity::Host,
     )
     .await
     .expect("M-002 /api/health 探测必须往返成功");
