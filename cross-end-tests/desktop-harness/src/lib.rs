@@ -339,9 +339,15 @@ pub async fn enable_link_crypto_http() {
 
 /// 运行期开关（与桌面端宿主 `set_traffic_encryption_config` 同款，差别是不落库）
 pub fn set_link_crypto_enabled(enabled: bool) {
-    let mut config = wasmnest_server_core::link_crypto::current_config();
-    config.enabled = enabled;
-    wasmnest_server_core::link_crypto::update_config(config);
+    // 旧「主开关」即应用策略：开 = `preferred`，关 = `off`（与 desktop_ctx.rs 同款）。
+    // 宿主不再持有全局开关；无应用开启时过滤器摘链，正是中间件 fail-visible 形态。
+    let policy = if enabled {
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Preferred
+    } else {
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Off
+    };
+    wasmnest_server_core::link_crypto::set_app_policy(SESSION_PLUGIN_ID, policy)
+        .unwrap_or_else(|e| panic!("设置 bedcode 链路加密策略失败: {e}"));
     wasmnest_server_core::link_crypto::sync_registration();
 }
 
