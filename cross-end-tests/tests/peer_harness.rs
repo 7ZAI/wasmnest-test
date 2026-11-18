@@ -357,9 +357,18 @@ async fn forged_identity_record_is_rejected_at_transport_layer_without_callbacks
     let err = dial_with_timeout(a, &forged)
         .await
         .expect_err("identity bridge must reject identity/address mismatch");
+    // dev 起拨号走多地址聚合：逐候选失败并入 `Transport` 明细
+    //（"all N dial candidates failed: …"），身份不符的拒绝事实由明细中的
+    // mismatch 文案与双方 node_id 钉住（期望 = 伪造记录声称的身份，实得 =
+    // 该地址对端的真实身份）。
+    let PeerNetError::Transport { detail } = &err else {
+        panic!("expected aggregated Transport error for rejected dial, got: {err}");
+    };
     assert!(
-        matches!(err, PeerNetError::IdentityMismatch { .. }),
-        "expected IdentityMismatch, got: {err}"
+        detail.contains("node_id 不匹配")
+            && detail.contains(c.id().as_str())
+            && detail.contains(b.id().as_str()),
+        "rejection must report node_id mismatch with both ids, got: {detail}"
     );
 
     // 传输层拒绝不得产生任何应用层事件或信任落库

@@ -80,11 +80,13 @@ fn lifecycle_command_names_exist_in_both_ends() {
 
 #[test]
 fn desktop_registers_all_lifecycle_commands() {
-    // 桌面侧还要钉「声明即注册」（bootstrap/mod.rs generate_handler 漏注册 = 壳 invoke
+    // 桌面侧还要钉「声明即注册」（启动装配里的 generate_handler 漏注册 = 壳 invoke
     // "command not found"，与移动端 plugin_approve 漏注册教训同形态）。
-    // 注册表随启动装配迁入 bootstrap/mod.rs（lib.rs 只留模块声明），扫描点跟真源走。
-    let bootstrap = std::fs::read_to_string(repo_root().join("wasmnest-desktop/src-tauri/src/bootstrap/mod.rs"))
-        .unwrap_or_else(|e| panic!("读桌面 bootstrap/mod.rs 失败: {e}"));
+    // 注册表真源 = `bootstrap/run.rs`（启动主流程）：bootstrap 模块按仓规拆为
+    // bootstrap.rs 声明 + bootstrap/ 目录实现，`generate_handler!` 块随启动主流程
+    // 迁入 run.rs，扫描点跟真源走。
+    let bootstrap = std::fs::read_to_string(repo_root().join("wasmnest-desktop/src-tauri/src/bootstrap/run.rs"))
+        .unwrap_or_else(|e| panic!("读桌面 bootstrap/run.rs 失败: {e}"));
     let start = bootstrap
         .find("generate_handler![")
         .expect("桌面 bootstrap/mod.rs 必须含 generate_handler");
