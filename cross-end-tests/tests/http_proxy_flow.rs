@@ -36,7 +36,7 @@
 //! | P-004a | `useHttpApi.ts httpResizeSession`（**移动端无 Rust 客户端**） | `POST /api/sessions/{id}/resize` 经代理真实往返，`{cols,rows,force}` 被桌面插件接受 | 正例 |
 //! | P-004b | `useHttpApi.ts` 配置/快捷指令/任务队列面 | `/api/configs`、`/api/quick-actions`、`/api/plugin/<id>/task-queue/list` 真实往返，响应信封 `{code,message,data}` | 正例 |
 //! | P-005 | `http_cancel`（oneshot + `tokio::select!`） | 在途请求被取消 → `REQUEST_CANCELED`；未知 `request_id` 幂等成功 | 正例 |
-//! | P-006 | spec §6 决策模型第 3 条（对端按协商头参与）与实现语义段（无应用开启加密则过滤器不注册）**自相矛盾** | 两端开关不一致（移动端开、桌面端关）时：带协商头的请求（POST 与 GET）一律**显性 4xx + 点名链路加密（`link-crypto is not active`）**，不再是 `1002 configId required` 那种误导性业务码；两端都关时明文照常可用（opt-in 基线） | 正例 + 反例 |
+//! | P-006 | spec §6 决策模型第 3 条（对端按协商头参与）与实现语义段（无应用开启加密则过滤器不注册）**自相矛盾** | 两端开关不一致（移动端开、桌面端关）时：带协商头的请求（POST 与 GET）一律**显性拒绝**（桌面端 4xx + 点名链路加密 `link-crypto is not active`，移动代理客户端把拒绝头映射为 `Egress(encryption-required)` 显性错误），不再是 `1002 configId required` 那种误导性业务码；两端都关时明文照常可用（opt-in 基线） | 正例 + 反例 |
 
 mod common;
 
@@ -521,7 +521,8 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     // 背景：spec §6 第 3 条「响应绑定」要求对端按协商头参与，而实现语义段又写
     // 「无应用开启链路加密 ⇒ 过滤器不注册」——两者矛盾。实现落在后者，修复前后果是：
     // 密文原样透给插件 → 插件当 JSON 解析 → 回 `1002 configId required`（误导性业务码，
-    // HTTP 200）。本组用例钉死 fail-visible 形状：显性 4xx + 点名链路加密。
+    // HTTP 200）。本组用例钉死 fail-visible 形状：桌面端显性 4xx + 点名链路加密，
+    // 移动代理客户端把拒绝头映射为显性 Egress(encryption-required) 错误。
     desktop_ctx::set_link_crypto_enabled(false);
 
     // 带 body 的 POST（密文）
@@ -536,21 +537,10 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         &CallerIdentity::Host,
     )
     .await
-    .expect("P-006 桌面端不参与时请求应走完传输（拒绝在网关/过滤器层，不是连接失败）");
-    assert_eq!(
-        refused.status, 400,
-        "P-006 桌面端未参与加密却收到协商头 → 必须显性 4xx；got {} body={}",
-        refused.status, refused.body_text
-    );
+    .expect_err("P-006 桌面端不参与时，带协商头的请求必须被显性拒绝");
     assert!(
-        refused.body_text.contains("link-crypto"),
-        "P-006 拒绝消息应点名链路加密能力（否则用户拿到一句无处置建议的 400），got {}",
-        refused.body_text
-    );
-    assert!(
-        !refused.body_text.contains("configId required"),
-        "P-006 这条路径不得再退化成插件的业务错误（密文当 JSON 解析的产物），got {}",
-        refused.body_text
+        refused.to_string().contains("encryption-required"),
+        "P-006 拒绝必须点名加密拒绝码（fail-visible，不得退化成插件业务码），got {refused}"
     );
 
     // GET 也拒：否则「GET 静默明文通、POST 神秘报业务错」的不一致更难排查
@@ -560,11 +550,10 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         &CallerIdentity::Host,
     )
     .await
-    .expect("P-006 GET 同样走完传输");
-    assert_eq!(
-        refused_get.status, 400,
-        "P-006 GET 带协商头时也必须显性拒绝（不得静默按明文放行），got {}",
-        refused_get.status
+    .expect_err("P-006 GET 带协商头时必须显性拒绝（不得静默按明文放行）");
+    assert!(
+        refused_get.to_string().contains("encryption-required"),
+        "P-006 GET 拒绝同样必须点名加密拒绝码，got {refused_get}"
     );
 
     // opt-in 基线回归：桌面端不参与时，**无协商头的明文请求照常通过**
