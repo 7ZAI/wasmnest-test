@@ -135,7 +135,6 @@ async fn spawn_pair(
         TransferConfig::default(),
         tx_a,
         serve_tx_a,
-        Arc::new(std::sync::Mutex::new(None)),
     );
 
     // B（接收/供流方）：真实共享注册表 + 自动放行策略
@@ -151,7 +150,6 @@ async fn spawn_pair(
         },
         tx_b,
         serve_tx_b,
-        Arc::new(std::sync::Mutex::new(None)),
     ));
 
     let (gate_tx_a, gate_rx_a) = mpsc::channel(16);

@@ -1051,11 +1051,7 @@ async fn receiver_process_restart_resumes_from_disk_truth() {
         partial_len > 0 && partial_len <= cut_at as u64,
         ".part must hold a non-empty prefix after the cut, got {partial_len}"
     );
-    // 优雅关停实例 #1：drop 只丢句柄，引擎连接 / 接收任务未必收尾（`.part` 仍可能被
-    // 旧任务持有），紧接着起实例 #2 会与新接收会话抢同一落盘状态，表现为偶发
-    // 「connection is closed」或事件看门狗超时。shutdown() 关连接 + 中止接收循环，
-    // 才让「进程被杀」这一断点语义在测试里成为确定的先后关系。
-    run1.shutdown().await;
+    drop(run1);
     drop(_cancel1);
     gate1.abort();
 
