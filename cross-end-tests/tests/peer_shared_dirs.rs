@@ -1,6 +1,6 @@
 //! 共享目录浏览/拉取 AC 测试（issue 07）。
 //!
-//! 复用 harness 惯例（进程内双节点、回环互指、真实 mTLS 直连），暴露端挂载
+//! 复用 harness 惯例（进程内双节点、回环互指、真实 libp2p 直连），暴露端挂载
 //! [`SharedDirHandler`]，浏览端以 crate 客户端 API（[`browse_shared_dir`] /
 //! [`pull_shared_file`]) 从节点公共 API 最高处驱动全部行为：
 //!

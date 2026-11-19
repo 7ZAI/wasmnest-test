@@ -140,7 +140,7 @@ async fn drive_gate_accept_all(mut events: mpsc::Receiver<TrustEvent>) {
 // ==================== AC#1 端到端 ====================
 
 /// 注入缝产物端到端可用：observe 进缓存且字段完整 → to_static_peer_record →
-/// mTLS 拨号 → 回声往返。守护回调与单测走的是同一个 observe 入口。
+/// libp2p 拨号 → 回声往返。守护回调与单测走的是同一个 observe 入口。
 #[tokio::test]
 async fn injected_record_flows_through_cache_into_trusted_dial() {
     let (a, b) = spawn_pair().await;
@@ -167,7 +167,7 @@ async fn injected_record_flows_through_cache_into_trusted_dial() {
     assert_eq!(cached.capabilities, CAP_FILE_TRANSFER);
     assert_eq!(cached.addr, b.addr());
 
-    // 注入缝产物直接可用于拨号：mTLS 握手 + 首连确认 + 双向落库全链路走通
+    // 注入缝产物直接可用于拨号：libp2p 握手 + 首连确认 + 双向落库全链路走通
     let record = cached.to_static_peer_record();
     let mut conn = match tokio::time::timeout(DIAL_TIMEOUT, a.node.dial(&record)).await {
         Ok(result) => result.expect("dial via discovered record must succeed"),

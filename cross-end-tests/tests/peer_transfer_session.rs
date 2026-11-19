@@ -1,6 +1,6 @@
 //! 传输会话 AC 测试（issue 05）：单文件推送 A→B 全生命周期。
 //!
-//! 复用 harness 惯例（进程内双节点、回环互指、真实 mTLS 直连），把上层
+//! 复用 harness 惯例（进程内双节点、回环互指、真实 libp2p 直连），把上层
 //! handler 从 EchoHandler 换成 [`TransferReceiveHandler`]——接收角色即生产
 //! 装配形状。首连确认闸门用自动接受驱动（信任语义已在 issue 02 覆盖）。
 //!
@@ -909,7 +909,7 @@ fn start_receiver_instance(
     (running, own_id, cancel, events, gate_task)
 }
 
-/// AC#1 类中断「传输中途掐断连接」：第一腿手摇推流至半程硬掐 TCP →
+/// AC#1 类中断「传输中途掐断连接」：第一腿手摇推流至半程硬掐连接 →
 /// 第二腿同 batch_id 重发 intent → 自接收端已写偏移续传至完成，内容一致
 #[tokio::test]
 async fn connection_drop_mid_file_resumes_and_content_matches() {
@@ -926,7 +926,9 @@ async fn connection_drop_mid_file_resumes_and_content_matches() {
     assert_eq!(offsets, vec![0], "fresh session must start from zero");
     drop(conn);
 
-    // 链路中断 → 接收端 Failed 终态；TCP 字节序保证已推字节此刻全部落盘
+    // 链路中断 → 接收端 Failed 终态。libp2p 流重置可能丢弃发送端缓冲的尾段，
+    // 已落盘字节即断点真源：只要求是 0..=cut_at 的前缀，不做精确字节断言
+    //（旧 TCP 语义下「已写全部落盘」的精确断言在这里不再成立）。
     wait_terminal_matching(&mut rx.events, "leg1", |s| {
         matches!(s, TerminalState::Failed { .. })
     })
@@ -936,7 +938,10 @@ async fn connection_drop_mid_file_resumes_and_content_matches() {
     let partial_len = std::fs::metadata(&part)
         .expect(".part must be kept after link drop")
         .len();
-    assert_eq!(partial_len, cut_at as u64, ".part must hold exactly the pushed bytes");
+    assert!(
+        partial_len > 0 && partial_len <= cut_at as u64,
+        ".part must hold a non-empty prefix of the pushed bytes, got {partial_len}"
+    );
 
     // 腿二：重发 intent（同 batch_id）→ 自断点续传完成
     let conn2 = dial_trusted(&a, &b).await;
@@ -1042,7 +1047,10 @@ async fn receiver_process_restart_resumes_from_disk_truth() {
     // 「杀掉」进程：实例 #1 全部内存态与任务一并销毁
     let part = downloads_b.join(part_name("batch-restart", 0));
     let partial_len = std::fs::metadata(&part).expect(".part survives process kill").len();
-    assert_eq!(partial_len, cut_at as u64);
+    assert!(
+        partial_len > 0 && partial_len <= cut_at as u64,
+        ".part must hold a non-empty prefix after the cut, got {partial_len}"
+    );
     drop(run1);
     drop(_cancel1);
     gate1.abort();
@@ -1125,13 +1133,14 @@ async fn multi_file_batch_retry_supplements_only_missing_files() {
     .await;
 
     let downloads = b.dir.path().join("downloads");
-    // f0 已落位、f1 断点在半程
+    // f0 已落位、f1 断点在半程（流重置可能丢弃尾段：取实际落盘前缀）
     assert_eq!(std::fs::read(downloads.join("f0.bin")).expect("f0 done"), c0);
-    assert_eq!(
-        std::fs::metadata(downloads.join(part_name("batch-multi", 1)))
-            .expect("f1 .part kept")
-            .len(),
-        cut1 as u64
+    let f1_partial = std::fs::metadata(downloads.join(part_name("batch-multi", 1)))
+        .expect("f1 .part kept")
+        .len();
+    assert!(
+        f1_partial > 0 && f1_partial <= cut1 as u64,
+        "f1 must keep a non-empty prefix, got {f1_partial}"
     );
 
     // 腿二：同批重发 → 只补 f1 余量与 f2 全量
@@ -1176,7 +1185,7 @@ async fn multi_file_batch_retry_supplements_only_missing_files() {
 
     // 批聚合的算术证明：第二腿首个样本 ≥ 基线（f0 满额 + f1 已写）——
     // 若 f0 被重传，首样本必然小于该基线
-    let baseline = (size0 + cut1) as u64;
+    let baseline = size0 as u64 + f1_partial;
     let grand_total = (size0 + size1 + size2) as u64;
     let (first, max) = progress_bounds(&mut a_events).await;
     assert!(first >= baseline, "completed files must not be re-streamed, first={first}");
@@ -1212,6 +1221,15 @@ async fn sender_cancel_then_retry_resumes_from_kept_part() {
         other => panic!("expected first progress event, got {other:?}"),
     }
     cancel_a.cancel();
+    // 必须先排空发送端事件通道：容量 2 的通道在 cancel 后仍会继续 emit
+    //（背压），不排空时 send_batch 卡在事件发送、看不到取消令牌——
+    // tokio::spawn 的发送任务与测试的 await 形成互等。宿主生产路径始终有
+    // 事件消费方（drive_send_session），此排空只为测试夹具还原该前提。
+    let a_seen = wait_terminal(&mut a_events).await;
+    assert_eq!(
+        terminal_of(&a_seen),
+        &TerminalState::Cancelled { by_peer: false }
+    );
     assert_eq!(
         sender.await.expect("join").expect("send io"),
         TerminalState::Cancelled { by_peer: false }

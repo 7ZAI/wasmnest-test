@@ -1,0 +1,28 @@
+[package]
+name = "relay-transport"
+# 内网穿透传输面集成测试工程（2026-11-10 收口）。
+# 单独成 workspace 成员的理由：场景只依赖能力仓 `wasmnest-relay` 与
+# `wasmnest-p2p-engine`，不需要任何宿主 lib。主包把桌面 / 移动宿主（tauri +
+# wasmtime）作为普通依赖，任何 test target 都会把它们拖进编译；本工程独立后
+# `cargo test -p relay-transport` 只编传输栈。
+version = "0.0.1"
+license = "MIT"
+edition = "2021"
+publish = false
+
+[dependencies]
+# 无生产依赖：本工程只承载集成测试（`src/lib.rs` 仅 crate 级说明）
+
+[dev-dependencies]
+# 进程内中继的身份 / 配置 / 数据目录走临时目录
+tempfile = "3"
+# 测试运行时与预留 / 拨号等待
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# `PeerAdmissionPort` 是 async trait（与能力仓同版本）
+async-trait = "0.1"
+# 入站流是 libp2p `Stream`（futures AsyncRead/AsyncWrite），`IncomingStreams` 是 Stream
+futures-util = "0.3"
+# 客户端：真实中继预留 / 经 `/p2p-circuit` 拨号（`relay` feature 必须显式开）
+wasmnest-p2p-engine = { path = "../../../wasmnest-lib/wasmnest-p2p-engine", features = ["relay"] }
+# 服务端：`server::start` 起真实中继（与公网部署同一份实现，零 mock）
+wasmnest-relay = { path = "../../../wasmnest-lib/wasmnest-relay" }

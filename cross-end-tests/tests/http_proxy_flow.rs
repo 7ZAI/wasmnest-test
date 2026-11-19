@@ -36,14 +36,15 @@
 //! | P-004a | `useHttpApi.ts httpResizeSession`（**移动端无 Rust 客户端**） | `POST /api/sessions/{id}/resize` 经代理真实往返，`{cols,rows,force}` 被桌面插件接受 | 正例 |
 //! | P-004b | `useHttpApi.ts` 配置/快捷指令/任务队列面 | `/api/configs`、`/api/quick-actions`、`/api/plugin/<id>/task-queue/list` 真实往返，响应信封 `{code,message,data}` | 正例 |
 //! | P-005 | `http_cancel`（oneshot + `tokio::select!`） | 在途请求被取消 → `REQUEST_CANCELED`；未知 `request_id` 幂等成功 | 正例 |
-//! | P-006 | spec §6 决策模型第 3 条（对端按协商头参与）与实现语义段（主开关关闭则过滤器不注册）**自相矛盾** | 两端开关不一致（移动端开、桌面端关）时：带协商头的请求（POST 与 GET）一律**显性 4xx + 点名 `trafficEncryption`**，不再是 `1002 configId required` 那种误导性业务码；两端都关时明文照常可用（opt-in 基线） | 正例 + 反例 |
+//! | P-006 | spec §6 决策模型第 3 条（对端按协商头参与）与实现语义段（无应用开启加密则过滤器不注册）**自相矛盾** | 两端开关不一致（移动端开、桌面端关）时：带协商头的请求（POST 与 GET）一律**显性拒绝**（桌面端 4xx + 点名链路加密 `link-crypto is not active`，移动代理客户端把拒绝头映射为 `Egress(encryption-required)` 显性错误），不再是 `1002 configId required` 那种误导性业务码；两端都关时明文照常可用（opt-in 基线） | 正例 + 反例 |
 
 mod common;
 
 use std::time::Duration;
 
-use wasmnest_mobile_lib::commands::egress::egress_declare_desktop_target;
-use wasmnest_mobile_lib::commands::http_proxy::{execute_proxy, http_cancel, HttpProxyRequest};
+use wasmnest_mobile_lib::egress;
+use wasmnest_mobile_lib::commands::http_proxy::{cancel_pending, execute_proxy, HttpProxyRequest};
+use wasmnest_mobile_lib::commands::host_gate::CallerIdentity;
 use wasmnest_mobile_lib::egress::ERROR_URL_NOT_DECLARED;
 use wasmnest_mobile_lib::system::error::AppError;
 
@@ -157,6 +158,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
                 None,
             ),
             None,
+        &CallerIdentity::Host,
         )
         .await
         .expect_err("P-001a 未声明的桌面目标必须被 L1 拒绝"),
@@ -169,6 +171,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         execute_proxy(
             desktop_request("p001b", "GET", "https://example.com/api/sessions", None),
             None,
+        &CallerIdentity::Host,
         )
         .await
         .expect_err("P-001b desktop kind 不得放行 https"),
@@ -187,7 +190,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         kind: None,
     };
     assert_egress(
-        execute_proxy(external, None)
+        execute_proxy(external, None, &CallerIdentity::Host)
             .await
             .expect_err("P-001c 无 UI 时 L3 必须 fail-closed（不得默认放行外网）"),
         wasmnest_mobile_lib::egress::ERROR_URL_DENIED,
@@ -195,7 +198,8 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     );
 
     // ==================== 声明桌面目标（生产入口：前端 setApiBaseUrl 时 invoke） ====================
-    egress_declare_desktop_target(host.clone(), port).expect("声明桌面目标");
+    // 命令面只是凭证门 + 声明动作；rig 无宿主凭证，直调声明动作（与移动端宿主测试同口径）
+    egress::policy().add_desktop_target(&host, port);
 
     // ==================== 认证（真实配对 → pin 随认证响应落地） ====================
     let auth = wasmnest_mobile_lib::auth::http::AuthHttpClient::new();
@@ -229,7 +233,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
 
     // ==================== P-002 JWT 注入 ====================
     let sessions = desktop_request("p002a", "GET", &format!("{base}/api/sessions"), None);
-    let ok = execute_proxy(sessions, None).await.expect("P-002a 有效 token 必须放行");
+    let ok = execute_proxy(sessions, None, &CallerIdentity::Host).await.expect("P-002a 有效 token 必须放行");
     assert_eq!(ok.status, 200, "P-002a /api/sessions 应 200");
     let listed = envelope_ok(&ok.body_text, "P-002a /api/sessions");
     assert!(
@@ -246,6 +250,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     let no_token = execute_proxy(
         desktop_request("p002b", "GET", &format!("{base}/api/sessions"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-002b 无 token 的请求应走完传输（拒绝发生在网关层，不是连接失败）");
@@ -269,6 +274,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     let forged = execute_proxy(
         desktop_request("p002c", "GET", &format!("{base}/api/sessions"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-002c 伪造 token 的请求应走完传输（拒绝发生在认证中心）");
@@ -306,6 +312,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
             Some(serde_json::json!({ "configId": config_id, "cols": 100, "rows": 30 }).to_string()),
         ),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-003a 加密信封 POST 必须往返成功");
@@ -344,6 +351,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
             ),
         ),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-003b 加密开启时 auth 路径仍必须可用（明文，不一刀切加密）");
@@ -372,6 +380,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
             Some(serde_json::json!({ "cols": 120, "rows": 40, "force": false }).to_string()),
         ),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-004a resize 必须往返成功");
@@ -387,6 +396,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     let configs = execute_proxy(
         desktop_request("p004b1", "GET", &format!("{base}/api/configs"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-004b /api/configs");
@@ -406,6 +416,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     let quick = execute_proxy(
         desktop_request("p004b2", "GET", &format!("{base}/api/quick-actions"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-004b /api/quick-actions");
@@ -425,6 +436,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
             None,
         ),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-004b task-queue/list");
@@ -441,6 +453,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     execute_proxy(
         desktop_request("p004c", "GET", &format!("{base}/api/quick-actions"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-004c 加密态下的 GET");
@@ -458,7 +471,8 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         .await
         .expect("bind blackhole listener");
     let blackhole_port = blackhole.local_addr().expect("blackhole addr").port();
-    egress_declare_desktop_target("127.0.0.1".to_string(), blackhole_port).expect("声明黑洞目标");
+    // 命令面只是凭证门 + 声明动作；rig 直调声明动作
+    egress::policy().add_desktop_target("127.0.0.1", blackhole_port);
     tokio::spawn(async move {
         let mut held = Vec::new();
         while let Ok((stream, _)) = blackhole.accept().await {
@@ -482,13 +496,14 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
                     kind: Some("desktop".to_string()),
                 },
                 None,
+        &CallerIdentity::Host,
             )
             .await
         })
     };
     // 让请求先真正发出去（进入 pending 表）再取消
     tokio::time::sleep(Duration::from_millis(300)).await;
-    http_cancel(cancel_id.clone()).await.expect("P-005 http_cancel 应成功");
+    cancel_pending(&cancel_id).await.expect("P-005 http_cancel 应成功");
     let cancelled = in_flight
         .await
         .expect("P-005 在途任务不应 panic")
@@ -498,15 +513,16 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
         "P-005 取消应显性报 REQUEST_CANCELED，got {cancelled}"
     );
     // 未知 request_id 幂等（前端取消按钮重复点 / 超时后清理都走这里）
-    http_cancel("p005-unknown-id".to_string())
+    cancel_pending("p005-unknown-id")
         .await
         .expect("P-005 未知 request_id 的取消必须幂等成功");
 
     // ==================== P-006 两端开关不一致：桌面端必须**显性拒绝** ====================
     // 背景：spec §6 第 3 条「响应绑定」要求对端按协商头参与，而实现语义段又写
-    // 「主开关关闭 ⇒ 过滤器不注册」——两者矛盾。实现落在后者，修复前后果是：
+    // 「无应用开启链路加密 ⇒ 过滤器不注册」——两者矛盾。实现落在后者，修复前后果是：
     // 密文原样透给插件 → 插件当 JSON 解析 → 回 `1002 configId required`（误导性业务码，
-    // HTTP 200）。本组用例钉死 fail-visible 形状：显性 4xx + 点名开关。
+    // HTTP 200）。本组用例钉死 fail-visible 形状：桌面端显性 4xx + 点名链路加密，
+    // 移动代理客户端把拒绝头映射为显性 Egress(encryption-required) 错误。
     desktop_ctx::set_link_crypto_enabled(false);
 
     // 带 body 的 POST（密文）
@@ -518,36 +534,26 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
             Some(serde_json::json!({ "configId": config_id, "cols": 100, "rows": 30 }).to_string()),
         ),
         None,
+        &CallerIdentity::Host,
     )
     .await
-    .expect("P-006 桌面端不参与时请求应走完传输（拒绝在网关/过滤器层，不是连接失败）");
-    assert_eq!(
-        refused.status, 400,
-        "P-006 桌面端未参与加密却收到协商头 → 必须显性 4xx；got {} body={}",
-        refused.status, refused.body_text
-    );
+    .expect_err("P-006 桌面端不参与时，带协商头的请求必须被显性拒绝");
     assert!(
-        refused.body_text.contains("trafficEncryption"),
-        "P-006 拒绝消息应点名开关（否则用户拿到一句无处置建议的 400），got {}",
-        refused.body_text
-    );
-    assert!(
-        !refused.body_text.contains("configId required"),
-        "P-006 这条路径不得再退化成插件的业务错误（密文当 JSON 解析的产物），got {}",
-        refused.body_text
+        refused.to_string().contains("encryption-required"),
+        "P-006 拒绝必须点名加密拒绝码（fail-visible，不得退化成插件业务码），got {refused}"
     );
 
     // GET 也拒：否则「GET 静默明文通、POST 神秘报业务错」的不一致更难排查
     let refused_get = execute_proxy(
         desktop_request("p006-get", "GET", &format!("{base}/api/sessions"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
-    .expect("P-006 GET 同样走完传输");
-    assert_eq!(
-        refused_get.status, 400,
-        "P-006 GET 带协商头时也必须显性拒绝（不得静默按明文放行），got {}",
-        refused_get.status
+    .expect_err("P-006 GET 带协商头时必须显性拒绝（不得静默按明文放行）");
+    assert!(
+        refused_get.to_string().contains("encryption-required"),
+        "P-006 GET 拒绝同样必须点名加密拒绝码，got {refused_get}"
     );
 
     // opt-in 基线回归：桌面端不参与时，**无协商头的明文请求照常通过**
@@ -557,6 +563,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
     let still_plain_ok = execute_proxy(
         desktop_request("p006-plain", "GET", &format!("{base}/api/sessions"), None),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("P-006 默认态（两端都不加密）明文请求必须照常通过");
@@ -585,6 +592,7 @@ async fn mobile_http_proxy_surface_matches_real_desktop() {
             None,
         ),
         None,
+        &CallerIdentity::Host,
     )
     .await
     .expect("收尾移除会话");

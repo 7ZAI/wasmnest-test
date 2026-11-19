@@ -7,7 +7,7 @@
 ```text
 perf-harness
 ├─ bridge 模块   宿主 ↔ wasm 插件的桥接原语（迁移自平台仓 wasm_bridge_bench）
-├─ boundary 模块 宿主规模（N 个应用同时常驻）与宿主 → 前端注册表投影边界
+├─ boundary 模块 宿主规模（N 个应用同时常驻、加压到容量边界）与宿主 → 前端注册表投影边界
 └─ apps 模块     四个随包业务应用的真实命令链路（ai-chatbox / agent-hub / BedCode / file-transfer）
 ```
 
@@ -37,6 +37,9 @@ cargo run --release --bin perf-harness -- --module boundary --full
 cargo run --release --bin perf-harness -- --module bridge --group E
 cargo run --release --bin perf-harness -- --group K --iters 10
 
+# 只量「最多同时跑多少个」（加压到边界，可调上限 / RSS 门限）
+cargo run --release --bin perf-harness -- --group S4 --max-apps 512 --rss-ceiling-mib 2048
+
 # 列出稳定场景 id
 cargo run --release --bin perf-harness -- --list
 
@@ -51,7 +54,9 @@ cargo run --release --bin perf-harness -- --full --compare baseline.json
 | --- | --- |
 | `--module bridge\|boundary\|apps\|all` | 模块选择（默认 all；services / crossend 为第二批） |
 | `--full` | 全量场景；默认只跑冒烟子集 |
-| `--group <G>` | 单字母分组或 id 子串过滤 |
+| `--group <G>` | 单字母分组或 id 子串过滤；**精确点名**（如 `--group S4`）时冒烟模式也会跑该非冒烟场景 |
+| `--max-apps <N>` | S4 加压探针的上限（默认 256；达到即记「未触底」） |
+| `--rss-ceiling-mib <M>` | S4 判定「这一档不可用」的整进程 RSS 上限（默认 4096） |
 | `--iters <N>` | 每测点重复次数（默认 full=5、冒烟=1，取中位数） |
 | `--json [path]` | 报告落盘路径（无路径时用默认路径） |
 | `--compare <path>` | 与历史 JSON 按测点 id 对比（只观察，不参与门禁） |
@@ -95,11 +100,23 @@ M 组只在 `--full` 下运行。M2 的容量 64 来自 `owner.rs::OWNER_QUEUE_C
 | S | S1 | 同一 wasm 组件摆成 N 个属主，逐个真激活（4 / 8 / 16 / 32）：每档激活总耗时、平均单应用耗时、常驻 RSS、逐实例命令；32 是容量探针，16 是交付门禁支撑数 |
 | S | S2 | N 个已激活实例并发命令扇出（N 条同时下发，看总耗时 / 单命令长尾 / 失败数） |
 | S | S3 | N 个实例顺序停用：总耗时、停用后 RSS、回收量、是否仍有 activated 实例 |
+| S | S4 | **加压探针**：4 起翻倍加压到某一档不可用（装配 / 激活失败、RSS 超上限、单命令延迟超响应上限），再二分收敛到相邻整数；输出最大可用数、首个不可用档与边界归因 |
 | F | F1 | `plugin_list_loaded` 的同源清单（`list_plugins`）在 4 / 16 / 64 / 256 个插件下的取数耗时与 JSON 体积（Tauri IPC 前的数据面） |
 
-S1/S2/S3 的 N 个实例使用 bench 夹具（同一组件多属主），F1 使用 TS-only 清单
+S1/S2/S3/S4 的 N 个实例使用 bench 夹具（同一组件多属主），F1 使用 frontend 形态清单
 （无 wasm 实例）；两者都走生产同形装配，把「运行时实例」与「清单体积」两个
 变量隔开。真实前端渲染 / 多任务预览不在无头进程里测，见「边界」。
+
+S1 是固定档曲线（4/8/16/32，回答「支撑数够不够」）；S4 回答「最多能到多少」：
+每档在**独立子进程**（`--capacity-probe <N>`）里从零装配 N 个实例、全量激活、
+逐实例 `bench.ping`，然后把 RSS / 激活耗时 / 回执写成标记行回给父进程。子进程
+不是洁癖：`init_message_bus` 把 `Arc<PluginHost>` 装进 message bus 的 dispatcher，
+host ↔ bus 成环，进程内停用后的实例不会释放，连续装配多档会让 RSS 逐档叠加、
+容量判定偏小（见 `docs/adr/0003-capacity-probe-to-the-boundary.md`）。
+判定顺序为 装配 → 激活 → 回执 → RSS → 单命令中位数，首个不可用档的实测原因就是
+边界归因（`assemble-failed` / `activation-failed` / `ping-failed` / `rss-ceiling` /
+`latency` / `probe-crashed`）；到上限仍全绿则记 `probe-limit`。二分依赖「档位越大
+越差」（RSS 与激活成本单调），每档实测都进报告，不只留结论。
 
 ### apps（真实随包应用）
 
@@ -110,9 +127,10 @@ S1/S2/S3 的 N 个实例使用 bench 夹具（同一组件多属主），F1 使�
 | J | J1–J4 | agent-hub：供应商预设更新、状态读取、技能读取、用量统计 |
 | K | K1–K6 | BedCode：会话配置 upsert/list、预设任务创建/删除、任务历史列表与统计、agent 能力清单 |
 | L | L1–L5 | file-transfer：设置、设备快照写读（64 / 512 条）、任务与历史列表 |
-| R | R1 | 四应用常驻后的当前 RSS / 峰值 RSS（最后执行，必须最后） |
+| R | R1 | 四应用常驻后的当前 RSS / 峰值 RSS（最后执行，必须最后）；逐应用激活增量 `R1.rss-delta.<app>` 与按可用内存估算的真实应用容量 `R1.real-app-estimate`（估算，非实测上限） |
 
-冒烟子集：`A1 D2 S1 F1 H1 I1 J1 K1 L1 R1`（S2/S3 只在 `--full` 下跑）。
+冒烟子集：`A1 D2 S1 F1 H1 I1 J1 K1 L1 R1`（S2/S3/S4 只在 `--full` 下跑；
+S4 也可用 `--group S4` 精确点名单跑）。
 
 ## 数量级门禁
 
@@ -125,6 +143,7 @@ S1/S2/S3 的 N 个实例使用 bench 夹具（同一组件多属主），F1 使�
 | S1 同时常驻（32 档） | 只记录容量探针，不设门禁（能跑到多少记多少） |
 | S2 并发扇出 | 总耗时 < 1 s；单命令中位数 < 50 ms；失败数 = 0 |
 | S3 停用回收 | 停用总耗时 < 60 s；停用后 activated 实例 = 0 |
+| S4 最大同时常驻（full） | 最大可用数 ≥ 16；RSS / 延迟上限默认 4 GiB / 10 ms（`--rss-ceiling-mib` 可调）；上限本身不设门禁 |
 | F1 注册表投影（256 档） | 取数 < 100 ms；JSON < 4 MiB |
 | M1 1 MiB echo × 64 并发 | 单次中位数 < 20 ms |
 | M1 1 MiB KV × 8 并发 | 单次中位数 < 100 ms |
@@ -152,13 +171,13 @@ bridge 各组的门限沿用迁移前口径，见 `src/modules/bridge.rs` 各场
 ## 环境隔离与无头语义
 
 - 每次运行在临时目录建内核库、插件私有库、用户插件目录；应用产物复制后再扫描，
-  平台仓 `resources/` 只读。boundary 的 N 个夹具属主 / N 个 TS-only 清单同样
-  落临时目录，退出清理。
+  平台仓 `resources/` 只读。boundary 的 N 个夹具属主 / N 个 frontend 形态清单同样
+  落临时目录，退出清理；S4 的每档在子进程里自建 / 自清自己的临时目录。
 - apps 模块把进程 `HOME` 指向临时沙箱（应用数据根 = `$HOME/.wasmnest/<app>`），
   退出恢复；bridge 的夹具编译子进程显式使用原始 `HOME`。
 - R1 读的是**整进程** RSS：`--module all` 会把 bridge / boundary 模块的运行时
-  驻留算进来（boundary 退出会清理环境，但分配器未必立刻归还）；单看四应用口径
-  请跑 `--module apps`。
+  驻留算进来（boundary 退出会清理环境，但分配器未必立刻归还；S4 加压档位更高，
+  残留更明显）；单看四应用口径请跑 `--module apps`。
 - 无 `AppHandle`：弹窗授权不可用。需要文件目录的应用按生产同款的
   `fs_granted_paths` 预授权，第一方免弹窗目录清单按生产装配注入；依赖弹窗或
   对端推送（如 file-transfer `set-settings`）的命令不在测量范围。
@@ -185,12 +204,17 @@ bridge 各组的门限沿用迁移前口径，见 `src/modules/bridge.rs` 各场
 ## 边界
 
 - **应用数没有硬编码上限**：宿主编排层不设 `max_apps` 常量；S1 的 16 是交付
-  支撑下限（当前随包 4 个应用的 4 倍余量），32 是容量探针（观察到哪算哪，
-  不把「超过 16」本身当回归）。真实上限由 RSS / 调度决定，S1 记录的是本机
-  本次实测值，跨机器不可直接比较。
-- **S1 是合成夹具，不是真实应用内存**：同一 bench 组件多属主只保留桥接原语，
-  单实例增量远小于真实业务应用；四个真实应用同时常驻的 RSS 看 `R1`。要扩大
-  真实应用数量，需要按应用产物复制属主并逐应用预授权，属于后续扩展，不用
+  支撑下限（当前随包 4 个应用的 4 倍余量），32 是固定档探针。真实上限由
+  RSS / 调度决定，由 S4 加压到边界给出（默认到 256，`--max-apps` 可调高）；
+  S4 的数字是本机本次实测值，跨机器不可直接比较，上限本身不设门禁——只有
+  「低于 16」才是回归。
+- **S1/S4 是合成夹具，不是真实应用内存**：同一 bench 组件多属主只保留桥接
+  原语，单实例增量远小于真实业务应用（S4 的 `S4.rss-per-app` 是该夹具的边际
+  内存）。真实应用口径看 `R1`：`R1.rss-delta.<app>` 是顺序激活的整进程增量，
+  `R1.real-app-estimate` = 可用内存 / 单应用增量中位数，是**估算**（首个应用
+  含 wasmtime 首次初始化，会高估）。要让真实应用也跑到容量边界，需要给复制
+  属主做命令 / api / 数据目录的命名空间隔离（当前清单里 `contributes.commands`
+  与 `api` 全局唯一，直接复制会被注册表 fail-closed 拒绝），属后续扩展，不用
   合成数字冒充。
 - **前端显示边界在平台仓**：`perf-tests` 无 WebView，`plugin_list_loaded` 的
   数据面由 F1 覆盖；多任务面板同时挂 N 张应用卡 / N 份 `mountPreview`、3 s

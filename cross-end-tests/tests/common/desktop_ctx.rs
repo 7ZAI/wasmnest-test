@@ -28,10 +28,16 @@ use wasmnest_desktop_lib::system::app_context::{AppContext, AppContextBuilder};
 use wasmnest_desktop_lib::system::info::SystemInfo;
 use wasmnest_desktop_lib::wasm_core::PluginHost;
 use wasmnest_desktop_lib::AppConfig;
+use wasmnest_wasm_core::manifest::PluginState;
 
-/// 认证中心 / 会话真源插件 id（`com.wasmnest.bedcode`：配对、JWT 签发、
-/// 会话登记域、WS 端点编排全在它自己进程内）
+/// 认证中心 / 会话真源插件 id（`com.wasmnest.bedcode`：会话登记域、WS 端点编排
+/// 与 /api/sessions、/api/configs 等业务面在它自己进程内）
 pub const SESSION_PLUGIN_ID: &str = "com.wasmnest.bedcode";
+
+/// 认证中心插件 id（dev：认证属主已从 bedcode 迁至独立的 `com.wasmnest.auth-center`，
+/// /api/auth/*（配对 / 验码 / QR / reauth / 生物面）由它提供，rig 必须随 bedcode
+/// 一并激活，否则配对端点无提供方（网关 401）
+pub const AUTH_CENTER_PLUGIN_ID: &str = "com.wasmnest.auth-center";
 
 /// 常驻事件通道端点后缀（插件 manifest `contributes.wsEndpoints` 声明值；宿主拼出
 /// 完整挂载路径 `/ws/plugin/<plugin-id>/session-control`）
@@ -159,10 +165,18 @@ pub fn bundled_plugins_dir() -> PathBuf {
     let artifact = dir.join(format!("{SESSION_PLUGIN_ID}/bedcode_plugin_terminal_session.wasm"));
     assert!(
         artifact.exists(),
-        "认证中心插件产物缺失：先在 wasmnest/wasmnest-desktop/ 跑 `pnpm run tauri:build` \
+        "会话插件产物缺失：先在 wasmnest/wasmnest-desktop/ 跑 `pnpm run tauri:build` \
          （或 node scripts/plugin-build.js --plugin {SESSION_PLUGIN_ID}），\
          期望产物：{}",
         artifact.display()
+    );
+    let center_artifact = dir.join(format!("{AUTH_CENTER_PLUGIN_ID}/wasmnest_plugin_auth_center.wasm"));
+    assert!(
+        center_artifact.exists(),
+        "认证中心插件产物缺失：先在 wasmnest/wasmnest-desktop/ 跑 \
+         `node scripts/plugin-build.js --plugin {AUTH_CENTER_PLUGIN_ID}`，\
+         期望产物：{}",
+        center_artifact.display()
     );
     dir
 }
@@ -212,12 +226,14 @@ pub async fn enable_link_crypto_http() {
     // `init_at_startup` 自身对身份失败只 error 日志 + 强制全关（fail-safe），
     // 因此这里必须核对快照真的开了，否则后续断言会在“全关但无报错”下假绿
     wasmnest_server_core::link_crypto::init_at_startup(link_crypto_dir(), guard.conn());
-    // 主开关：GUI 由用户在设置页写入 DB settings，rig 直接置运行期快照
-    // （其余子开关 / 明文回落策略取默认值 = 子通道全开 + 允许老客户端明文）
-    wasmnest_server_core::link_crypto::update_config(wasmnest_server_core::link_crypto::LinkCryptoConfig {
-        enabled: true,
-        ..Default::default()
-    });
+    // 主开关 → 应用策略（2026-11-04 用户裁决：策略属于应用，宿主无开关、不设下限）：
+    // 旧「enabled + 允许明文回落」的默认值等价于 `preferred`——对端支持就加密，
+    // 不支持就放行明文（永不拒绝）
+    wasmnest_server_core::link_crypto::set_app_policy(
+        SESSION_PLUGIN_ID,
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Preferred,
+    )
+    .expect("设置 bedcode 链路加密策略为 preferred");
     wasmnest_server_core::link_crypto::sync_registration();
     assert!(
         wasmnest_server_core::link_crypto::identity_parts().is_some(),
@@ -225,15 +241,22 @@ pub async fn enable_link_crypto_http() {
     );
 }
 
-/// 运行期开关：桌面端链路加密参与意愿（与宿主 `set_traffic_encryption_config` 同款，
-/// 差别是 rig 不落库——只改内存快照 + 同步过滤器注册）
+/// 运行期开关：桌面端链路加密参与意愿（策略属于应用，rig 直接写应用策略 + 同步过滤器注册，
+/// 不落库）
 ///
 /// 用它覆盖「两端开关不一致」这一格：移动端开着加密、桌面端关着时，桌面端必须
 /// **显性拒绝**协商过的请求，而不是把密文透给业务解析。
 pub fn set_link_crypto_enabled(enabled: bool) {
-    let mut config = wasmnest_server_core::link_crypto::current_config();
-    config.enabled = enabled;
-    wasmnest_server_core::link_crypto::update_config(config);
+    // 旧「主开关」即应用策略：开 = `preferred`（与旧默认同义），关 = `off`。
+    // 全部应用为 `off` 且无存量 WS 密文会话时，sync_registration 把过滤器摘出链——
+    // 正是中间件 fail-visible 分支显性拒绝带协商头请求的形态（P-006）。
+    let policy = if enabled {
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Preferred
+    } else {
+        wasmnest_server_core::link_crypto::EncryptionPolicy::Off
+    };
+    wasmnest_server_core::link_crypto::set_app_policy(SESSION_PLUGIN_ID, policy)
+        .unwrap_or_else(|e| panic!("设置 bedcode 链路加密策略失败: {e}"));
     wasmnest_server_core::link_crypto::sync_registration();
 }
 
@@ -260,11 +283,14 @@ pub async fn init_app_context_without_center() {
     init_app_context_inner(false).await
 }
 
-/// 激活认证中心插件（`init_app_context_without_center` 之后用；可重复调用）
+/// 激活认证中心与本会话插件（dev 起认证属主为独立的 auth-center 插件，
+/// /api/auth/* 由它提供；bedcode 提供会话 / 配置 / WS 面。可重复调用）
 pub async fn activate_session_center() {
-    AppContext::global()
-        .plugin_host()
-        .activate_plugin(SESSION_PLUGIN_ID, false)
+    let host = AppContext::global().plugin_host();
+    host.activate_plugin(AUTH_CENTER_PLUGIN_ID, false)
+        .await
+        .expect("activate com.wasmnest.auth-center (bundled artifact)");
+    host.activate_plugin(SESSION_PLUGIN_ID, false)
         .await
         .expect("activate com.wasmnest.bedcode (bundled artifact)");
 }
@@ -307,6 +333,26 @@ async fn init_app_context_inner(activate_center: bool) {
             .wasm_host_ctx()
             .set_plugin_db_root(Some(plugin_db_root().clone()));
         plugin_host.init_message_bus().await;
+        // L2 认证中心在 `PluginHost::new` 内被角色驱动层**自动激活**——早于本 rig
+        // 的私有库根注入，其激活期建表（ensure_schema）必然降级（无根 →
+        // "plugin database unavailable in headless context");已激活态又使后续
+        // 显式激活成为 no-op，建表永不重跑。根注入后在这里 deactivate + 重新
+        // activate，强制 ensure_schema 带根重跑（认证记录私有库是配对 / 信任
+        // 记录面的真源，缺表会使记录域整体降级）。
+        if plugin_host
+            .get_plugin(AUTH_CENTER_PLUGIN_ID)
+            .await
+            .is_some_and(|info| info.state == PluginState::Activated)
+        {
+            plugin_host
+                .deactivate_plugin(AUTH_CENTER_PLUGIN_ID, false)
+                .await
+                .expect("deactivate auth-center 以带根重跑建表");
+        }
+        plugin_host
+            .activate_plugin(AUTH_CENTER_PLUGIN_ID, false)
+            .await
+            .expect("activate com.wasmnest.auth-center (bundled artifact)");
         // guest 事件派发器（生产同款）：缺省 `UnwiredGuestEvents` 会让总线投递 fail-visible
         //（会话中心 dispatch 报错 → trap；实测症状 = 插件 api 回调超时）。本 rig 自建
         // PluginHost 须自行注入——晚绑定使注入对扫描期已建实例同样生效。
@@ -333,8 +379,9 @@ async fn init_app_context_inner(activate_center: bool) {
         install_server_ports();
 
         if activate_center {
-            // 激活认证中心：/api/auth/*、/api/sessions*、/api/configs 与两条 WS
-            // 插件端点全在插件侧；激活期宿主据 manifest 自动登记端点
+            // 认证中心已在上面的根注入后重建（角色驱动层在 PluginHost::new 内
+            // 抢先激活、建表降级，此处仅补会话插件：bedcode 提供 /api/sessions*、
+            // /api/configs 与两条 WS 插件端点；激活期宿主据 manifest 自动登记端点）
             plugin_host
                 .activate_plugin(SESSION_PLUGIN_ID, false)
                 .await

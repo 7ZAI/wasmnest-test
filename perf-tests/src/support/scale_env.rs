@@ -4,7 +4,7 @@
 //! - **N 个 wasm 实例**（同一 bench 组件、不同属主）：宿主能同时**运行**多少个
 //!   应用（激活、命令、停用、RSS）。合成夹具只保留桥接原语，避免业务数据增长
 //!   把规模曲线搅浑；
-//! - **N 个 TS-only 清单**（无 wasm 实例）：宿主 → 前端的注册表投影
+//! - **N 个 frontend 形态清单**（无 wasm 实例）：宿主 → 前端的注册表投影
 //!   （`plugin_list_loaded` 的同源数据）在多大数量级下仍然可序列化。这一层不做
 //!   激活，专门隔离「清单体积」与「运行时实例」两个变量。
 //!
@@ -62,7 +62,7 @@ pub async fn build_wasm_instances(count: usize) -> anyhow::Result<ScaleEnv> {
     })
 }
 
-/// 建 N 个 TS-only 插件目录并装配宿主（无 wasm 实例，只测清单投影）。
+/// 建 N 个 frontend 形态插件目录并装配宿主（无 wasm 实例，只测清单投影）。
 pub async fn build_manifests(count: usize) -> anyhow::Result<ScaleEnv> {
     anyhow::ensure!(count > 0, "清单投影至少需要 1 个插件");
     let temp_root = unique_root("scale-manifest");
@@ -104,7 +104,7 @@ fn stage_wasm_instances(plugins_dir: &Path, count: usize) -> anyhow::Result<Vec<
     Ok(ids)
 }
 
-/// N 个最小 TS-only 清单：`plugin_list_loaded` 的投影对象，不含 wasm。
+/// N 个最小 frontend 形态清单：`plugin_list_loaded` 的投影对象，不含 wasm。
 fn stage_manifests(plugins_dir: &Path, count: usize) -> anyhow::Result<Vec<String>> {
     let mut ids = Vec::with_capacity(count);
     for i in 0..count {
@@ -120,7 +120,9 @@ fn stage_manifests(plugins_dir: &Path, count: usize) -> anyhow::Result<Vec<Strin
             "description": "perf registry projection fixture",
             "author": "WasmNest",
             "main": "index.js",
-            "pluginType": "ts-only"
+            // 形态词表 2026-10-26 重定义：'ts-only' 已退役，前端形态统一写 'frontend'
+            // （loader 会 fail-closed 拒绝旧词，清单数量不符会让 F1 直接失败）
+            "pluginType": "frontend"
         });
         std::fs::write(dir.join("plugin.json"), serde_json::to_string_pretty(&manifest)?)?;
         std::fs::write(dir.join("index.js"), "// perf manifest fixture\n")?;

@@ -174,6 +174,8 @@ jobs:
       #  - 六个源码文本锁（跨仓契约漂移 / 权限与命令词汇 / mDNS 单例 / bedcode
       #    应用身份 / file-transfer 单产物接线）
       #  - 五个 peer 场景（真实 mTLS 双节点；lock 的行为面互补）
+      #  - 穿透传输面（`relay-transport`：进程内真实 `wasmnest-relay` + 引擎客户端
+      #    预留 / 经 `/p2p-circuit` 拨号；独立 workspace 成员，不拖宿主 lib 进编译）
       # 依赖随包产物的 *_flow / harness_selfcheck / two-proc 留在 full（nightly）。
       # 名单增删时同步本注释与仓 AGENTS.md §1。
       - name: cargo test（锁 + peer 稳定子集）
@@ -191,6 +193,12 @@ jobs:
             --test peer_shared_dirs \
             --test peer_transfer_session \
             --test peer_pause_symmetry
+
+      # 穿透传输面（独立成员）：项目内真实中继服务端 + 引擎客户端，零外部依赖。
+      # 公网已部署中继的用例是 `#[ignore]` + `WASMNEST_RELAY_E2E_ADDRS`，不进 CI。
+      - name: cargo test（穿透传输面）
+        working-directory: wasmnest-test/cross-end-tests
+        run: cargo test -p relay-transport
 
   # ============== nightly 全量：随包产物 e2e + 全量 cargo test + two-proc（不进 PR 阻断） ==============
   # 触发：schedule（nightly）、workflow_dispatch 勾选 full。

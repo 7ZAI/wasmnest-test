@@ -98,24 +98,6 @@ async fn remove_session(base: &str, token: &str, session_id: &str, what: &str) {
     assert_eq!(resp.status(), 200, "{what} 移除会话 HTTP 状态应为 200");
 }
 
-/// 带移动 JWT 的真实 HTTP 读会话列表（对账腿用）
-async fn list_sessions(base: &str, token: &str) -> Vec<serde_json::Value> {
-    let resp = reqwest::Client::new()
-        .get(format!("{base}/api/sessions"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .expect("读列表失败");
-    let body: serde_json::Value = resp.json().await.expect("列表响应非 JSON");
-    assert_eq!(body["code"], 0, "列表业务码应为 0：{body}");
-    // 桌面契约：`data: {sessions: [...]}`（旧控制器逐字段形状）；数组形状一并接受
-    let data = &body["data"];
-    data.as_array()
-        .cloned()
-        .or_else(|| data["sessions"].as_array().cloned())
-        .unwrap_or_default()
-}
-
 /// 播种的会话配置名（会话记录名 = 配置名，事件 `session_name` 的来源）
 const CONFIG_NAME: &str = "cross-end-events";
 
@@ -536,17 +518,19 @@ async fn plugin_events_reach_mobile_over_real_event_channel() {
     )
     .await;
 
-    // 对账腿：漏掉的状态变化必须能靠 HTTP 全量拉取补齐
-    // （这正是 `ws_event_channel_ready` 存在的原因——事件不重放，重连后必须对账）
+    // 对账腿：漏掉的状态变化必须能靠「不经过事件重放」的只读真源补齐
+    // （这正是 `ws_event_channel_ready` 存在的原因——事件不重放，重连后必须对账）。
+    // 用命令面 `session.get` 单会话读而非 `GET /api/sessions`：后者带 scope=session，
+    // 项目归属会话（seed_shell_config 的 workingDir 会生成 project_id）不在终端列表里，
+    // 用它对账会永远读不到本会话（空列表 → 假红）。session.get 直读同一条登记记录，
+    // 与事件发布者是同一真源，恰好验证「不重放也可对账」。
     let mut reconciled = None;
     for _ in 0..100 {
-        let list = list_sessions(&base, &token).await;
-        if let Some(entry) = list.iter().find(|s| s["id"] == task_session) {
-            let st = entry["status"].as_str().unwrap_or("").to_string();
-            if st != "running" {
-                reconciled = Some(st);
-                break;
-            }
+        let view = plugin_command("session.get", serde_json::json!({ "sessionId": task_session })).await;
+        let st = view["status"].as_str().unwrap_or("").to_string();
+        if !st.is_empty() && st != "running" && st != "stopping" {
+            reconciled = Some(st);
+            break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

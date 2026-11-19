@@ -1011,6 +1011,44 @@ fn r1_memory(env: &AppsEnv, rep: &mut Report) {
             "非 Linux：峰值不可用，退回当前值",
         ),
     }
+
+    // 单应用常驻增量（顺序激活的 RSS 差值）：回答「真实应用每个吃多少内存」，
+    // 给「本机还能容纳多少个」一个实测锚点。首个应用含 wasmtime 引擎与组件
+    // 缓存的首次初始化，会被高估——报告附注里标注，不用它冒充单应用画像。
+    let mut previous = env.rss_before_activation_bytes;
+    let mut deltas: Vec<f64> = Vec::new();
+    for record in env.activation.iter().filter(|r| r.ok) {
+        if record.rss_bytes == 0 {
+            continue;
+        }
+        let delta = crate::support::rss::mib(record.rss_bytes.saturating_sub(previous));
+        previous = record.rss_bytes;
+        deltas.push(delta);
+        rep.record(
+            &format!(
+                "R1.rss-delta.{}",
+                record.id.rsplit('.').next().unwrap_or(record.id)
+            ),
+            "R 内存",
+            &format!("{} 激活增量", record.label),
+            "MiB",
+            vec![delta],
+            "顺序激活的整进程 RSS 差值（首个应用含 wasmtime 首次初始化）",
+        );
+    }
+    if let Some(available) = crate::support::rss::available_memory_bytes() {
+        let per_app = median(&deltas);
+        if per_app > 0.0 {
+            rep.record(
+                "R1.real-app-estimate",
+                "R 内存",
+                "按实测增量估算可容纳真实应用数",
+                "个",
+                vec![crate::support::rss::mib(available) / per_app],
+                "可用内存 / 单应用增量中位数；估算值，不是实测上限（实测容量见 boundary S4 合成夹具口径）",
+            );
+        }
+    }
 }
 
 // ==================== 小工具 ====================
